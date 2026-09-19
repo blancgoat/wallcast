@@ -35,7 +35,9 @@ internal static class Program
                 Application.EnableVisualStyles();
                 var name = args.SkipWhile(a => a != "--desktop").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? CaptureDevices.Enumerate()[0];
                 var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault();
-                var settings = new CaptureOptions(Aspect: chosen ?? CaptureOptions.Aspects[0]).Normalize();
+                var res = args.SkipWhile(a => a != "--resolution").Skip(1).FirstOrDefault();
+                var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
+                    Aspect: chosen ?? CaptureOptions.Aspects[0]).Normalize();
                 var host = new DesktopHost();
                 host.Attach(Screen.PrimaryScreen!);
                 var capture = new CapturePlayback(name, 150, settings);
@@ -45,8 +47,9 @@ internal static class Program
                 surface.Failed += message => trouble ??= message;
                 host.Controls.Add(surface);
                 capture.Start();
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 var result = 2;
-                var probe = new System.Windows.Forms.Timer { Interval = 4000 };
+                var probe = new System.Windows.Forms.Timer { Interval = 6000 };
                 probe.Tick += (_, _) =>
                 {
                     probe.Stop();
@@ -54,6 +57,8 @@ internal static class Program
                     try
                     {
                         if (trouble is not null) { Console.WriteLine("FAIL: " + trouble); return; }
+                        var seconds = clock.Elapsed.TotalSeconds;
+                        Console.WriteLine($"RATE {settings.Resolution}: {capture.Frames / seconds:F1} fps received, {surface.Presented / seconds:F1} fps on screen");
                         if (capture.Frames == 0) { Console.WriteLine("FAIL: no frames arrived from the device"); return; }
                         shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
                         shell!.GetType().InvokeMember("MinimizeAll", System.Reflection.BindingFlags.InvokeMethod, null, shell, null);
@@ -89,6 +94,28 @@ internal static class Program
                 probe.Start();
                 Application.Run();
                 return result;
+            }
+            if (args.Contains("--bench"))
+            {
+                var name = args.SkipWhile(a => a != "--bench").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? CaptureDevices.Enumerate()[0];
+                foreach (var res in new[] { "1920x1080", "2560x1440", "3840x2160" })
+                {
+                    var settings = new CaptureOptions(Resolution: res).Normalize();
+                    using var capture = new CapturePlayback(name, 150, settings);
+                    string? trouble = null;
+                    capture.Failed += m => trouble ??= m;
+                    var watch = System.Diagnostics.Stopwatch.StartNew();
+                    capture.Start();
+                    while (watch.Elapsed.TotalSeconds < 3) Thread.Sleep(50);
+                    var warm = capture.Frames;
+                    var mark = watch.Elapsed.TotalSeconds;
+                    while (watch.Elapsed.TotalSeconds < 9) Thread.Sleep(50);
+                    var rate = (capture.Frames - warm) / (watch.Elapsed.TotalSeconds - mark);
+                    var mb = (double)settings.FrameSize.Width * settings.FrameSize.Height * 4 * rate / (1024 * 1024);
+                    Console.WriteLine($"PIPE {res}: {rate:F1} fps  {mb:F0} MB/s{(trouble is null ? "" : "  TROUBLE: " + trouble)}");
+                    Console.WriteLine($"   engine: {capture.InputDescription}");
+                }
+                return 0;
             }
             Core.Initialize();
             using var engine = new LibVLC("--no-video-title-show", "--vout=dummy", "--aout=dummy");
@@ -127,7 +154,7 @@ internal static class Program
             }
             try { using var missing = new VideoSource("nonexistent-video.mp4").Open(engine); throw new Exception("Missing file accepted"); }
             catch (FileNotFoundException) { Console.WriteLine("PASS: Missing file rejected"); }
-            try { new CaptureOptions().CreateStartInfo("", 150); throw new Exception("Empty device accepted"); }
+            try { new CaptureOptions().CreateStartInfo("", 150, "pipe:1"); throw new Exception("Empty device accepted"); }
             catch (InvalidOperationException) { Console.WriteLine("PASS: Empty device rejected"); }
             if (new CaptureOptions().Fit(new Size(3840, 2160)) != new Rectangle(0, 0, 3840, 2160)) throw new Exception("16:9 geometry distorted");
             if (new CaptureOptions(Aspect: "4:3").Fit(new Size(3840, 2160)) != new Rectangle(480, 0, 2880, 2160)) throw new Exception("4:3 geometry distorted");

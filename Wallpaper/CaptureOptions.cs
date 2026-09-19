@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 
 namespace Still;
 
@@ -48,19 +49,25 @@ internal sealed record CaptureOptions(
     }
     private string Matrix => ColorSpace switch { "Rec.601" => "bt601", "Rec.2020" => "bt2020", _ => "bt709" };
 
-    public ProcessStartInfo CreateStartInfo(string device, int bufferMilliseconds)
+    // The DirectShow queue holds frames in the device's own format, not the converted BGRA output.
+    private double InputBytesPerPixel => Format switch { "YUY2" or "UYVY" => 2, "RGB24" => 3, "MJPEG" => 1, _ => 1.5 };
+
+    public ProcessStartInfo CreateStartInfo(string device, int bufferMilliseconds, string output)
     {
         if (string.IsNullOrWhiteSpace(device)) throw new InvalidOperationException("캡처 장치를 선택해 주세요.");
         if (this != Normalize()) throw new InvalidOperationException("지원하지 않는 캡처 설정입니다.");
         var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "capture", "ffmpeg.exe"))
         {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true
         };
         var frameSize = FrameSize;
-        // Bound the DirectShow queue; the renderer separately keeps only the newest frame.
-        var bytes = Math.Clamp((long)frameSize.Width * frameSize.Height * 4 * 60 * bufferMilliseconds / 1000, 16_000_000, 512_000_000);
-        string[] args = ["-hide_banner", "-loglevel", "info", "-nostdin", "-f", "dshow", "-rtbufsize", bytes.ToString(),
+        // Bound the DirectShow queue; the renderer separately keeps only the newest frame. Sizing this
+        // from the output format would buffer far more than the requested milliseconds, and every extra
+        // queued frame is latency once the reader cannot keep up.
+        var frameBytes = (long)(frameSize.Width * frameSize.Height * InputBytesPerPixel);
+        var rate = double.Parse(Fps, CultureInfo.InvariantCulture);
+        var bytes = Math.Clamp((long)(frameBytes * rate * bufferMilliseconds / 1000), frameBytes * 3, 512_000_000);
+        string[] args = ["-hide_banner", "-y", "-loglevel", "info", "-nostdin", "-f", "dshow", "-rtbufsize", bytes.ToString(),
             "-video_size", Resolution, "-framerate", Fps];
         foreach (var arg in args) info.ArgumentList.Add(arg);
         if (Format == "MJPEG") { info.ArgumentList.Add("-vcodec"); info.ArgumentList.Add("mjpeg"); }
@@ -70,7 +77,7 @@ internal sealed record CaptureOptions(
             info.ArgumentList.Add(Format switch { "YUY2" => "yuyv422", "UYVY" => "uyvy422", "RGB24" => "bgr24", _ => "nv12" });
         }
         foreach (var arg in new[] { "-i", "video=" + device, "-an", "-sn", "-dn", "-vf", ConversionFilter,
-            "-fps_mode", "passthrough", "-threads", "2", "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1" }) info.ArgumentList.Add(arg);
+            "-fps_mode", "passthrough", "-threads", "2", "-f", "rawvideo", "-pix_fmt", "bgra", output }) info.ArgumentList.Add(arg);
         return info;
     }
 

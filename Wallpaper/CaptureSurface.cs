@@ -12,13 +12,17 @@ internal sealed class CaptureSurface : Control
 {
     private readonly CapturePlayback capture;
     private readonly Layer video = new();
-    private readonly System.Windows.Forms.Timer timer = new() { Interval = 15 };
     private readonly Size frame;
+    private int queued;
+    private bool stopped;
     private ID3D11Device? device;
     private ID3D11DeviceContext? context;
     private IDXGISwapChain1? backdrop;
     private IDXGISwapChain1? stream;
     private ID3D11Texture2D? upload;
+    private long presented;
+    // Frames actually put on screen, which is not the same as frames received from the device.
+    public long Presented => Interlocked.Read(ref presented);
     public event Action<string>? Failed;
 
     public CaptureSurface(CapturePlayback capture)
@@ -29,14 +33,29 @@ internal sealed class CaptureSurface : Control
         Dock = DockStyle.Fill;
         BackColor = Color.Black;
         Controls.Add(video);
-        timer.Tick += (_, _) => Draw();
+        capture.FrameReady += OnFrameReady;
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         Arrange();
-        timer.Start();
+    }
+
+    // Presenting the moment a frame lands beats polling on a timer, whose ~15ms resolution adds that
+    // much latency to every frame. One draw in flight is enough: the capture keeps only the newest.
+    private void OnFrameReady()
+    {
+        if (stopped || Interlocked.Exchange(ref queued, 1) == 1) return;
+        try
+        {
+            if (IsDisposed || !IsHandleCreated) Interlocked.Exchange(ref queued, 0);
+            else BeginInvoke(Draw);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            Interlocked.Exchange(ref queued, 0);
+        }
     }
 
     protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); Arrange(); }
@@ -97,7 +116,7 @@ internal sealed class CaptureSurface : Control
         try { CreateResources(); return true; }
         catch (Exception ex)
         {
-            timer.Stop();
+            Stop();
             Release();
             Failed?.Invoke("바탕화면 렌더러를 초기화하지 못했습니다: " + ex.Message);
             return false;
@@ -106,7 +125,8 @@ internal sealed class CaptureSurface : Control
 
     private void Draw()
     {
-        if (!Ready()) return;
+        Interlocked.Exchange(ref queued, 0);
+        if (stopped || !Ready()) return;
         var bytes = capture.TakeFrame();
         if (bytes is null) return;
         try
@@ -116,24 +136,34 @@ internal sealed class CaptureSurface : Control
             var map = context.Map(upload, 0, MapMode.WriteDiscard);
             try
             {
-                for (var y = 0; y < frame.Height; y++)
-                    Marshal.Copy(bytes, y * row, IntPtr.Add(map.DataPointer, y * (int)map.RowPitch), row);
+                // One copy instead of 2160 of them whenever the driver hands back a packed surface.
+                if (map.RowPitch == row) Marshal.Copy(bytes, 0, map.DataPointer, row * frame.Height);
+                else
+                    for (var y = 0; y < frame.Height; y++)
+                        Marshal.Copy(bytes, y * row, IntPtr.Add(map.DataPointer, y * (int)map.RowPitch), row);
             }
             finally { context.Unmap(upload, 0); }
             using (var back = stream.GetBuffer<ID3D11Texture2D>(0)) context.CopyResource(back, upload);
             stream.Present(0, PresentFlags.None);
+            Interlocked.Increment(ref presented);
         }
         catch (Exception ex)
         {
-            timer.Stop();
+            Stop();
             Failed?.Invoke("바탕화면 렌더링이 중단되었습니다: " + ex.Message);
         }
         finally { CapturePlayback.ReturnFrame(bytes); }
     }
 
+    private void Stop()
+    {
+        stopped = true;
+        capture.FrameReady -= OnFrameReady;
+    }
+
     private void Release()
     {
-        timer.Stop();
+        Stop();
         upload?.Dispose(); upload = null;
         stream?.Dispose(); stream = null;
         backdrop?.Dispose(); backdrop = null;
@@ -143,7 +173,7 @@ internal sealed class CaptureSurface : Control
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { Release(); timer.Dispose(); }
+        if (disposing) Release();
         base.Dispose(disposing);
     }
 

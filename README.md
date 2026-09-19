@@ -9,7 +9,7 @@ Windows용 작은 영상 바탕화면 앱. 동영상 또는 캡처 장치 하나
 3. 출력 모니터를 선택하고 **바탕화면 적용**.
 4. **중지**하면 기존 배경이 다시 보입니다. 창의 X는 트레이로 숨기며, 완전 종료는 트레이 메뉴의 **종료**입니다.
 
-동영상은 원본 비율을 유지하며 반복됩니다. 화면과 비율이 다르면 검은 여백이 생깁니다. 기본 음소거이며 해제할 수 있습니다. 캡처는 영상만 출력합니다. 캡처 버퍼 값은 DirectShow 큐 용량을 정하는 기준이며 정확한 지연 시간이 아닙니다. 화면 출력은 가장 최근 프레임을 사용합니다.
+동영상은 원본 비율을 유지하며 반복됩니다. 화면과 비율이 다르면 검은 여백이 생깁니다. 기본 음소거이며 해제할 수 있습니다. 캡처는 영상만 출력합니다. 캡처 버퍼 값은 DirectShow 큐 용량을 정하는 기준이며 정확한 지연 시간이 아닙니다. 큐 용량은 장치가 내보내는 형식의 프레임 크기로 계산하므로, 같은 값이면 해상도가 올라가도 담기는 프레임 수는 같습니다. 화면 출력은 가장 최근 프레임을 사용하며, 프레임이 도착할 때마다 바로 표시합니다.
 
 ### 캡처 설정
 
@@ -44,7 +44,7 @@ dotnet publish Wallpaper -c Release -r win-x64 --self-contained true -o artifact
 - `Sources.cs`: 파일/캡처 입력 모델.
 - `Playback.cs`: 입력별 재생 경로 선택, LibVLC 동영상 재생, 반복, 오류와 자원 정리.
 - `CaptureOptions.cs`: 픽셀 형식·해상도·FPS·YUV 변환·표시 비율.
-- `CapturePlayback.cs`: FFmpeg DirectShow 입력, 명시적인 색 변환, 최신 프레임 유지.
+- `CapturePlayback.cs`: FFmpeg DirectShow 입력, 명시적인 색 변환, 최신 프레임 유지. 프레임은 이름 있는 파이프로 받습니다. 리디렉션된 stdout 파이프는 버퍼가 작아 약 800MB/s에서 막히는데, 4K 60fps BGRA는 2.0GB/s가 필요합니다.
 - `CaptureSurface.cs`: BGRA 프레임을 DXGI 플립 모델 스왑 체인으로 출력하고 비율을 유지합니다. 확대/축소는 GPU가 처리합니다.
 - `DesktopHost.cs`: Windows Explorer WorkerW에 영상 창 연결.
 - `CaptureDevices.cs`: DirectShow 비디오 장치 검색.
@@ -71,7 +71,11 @@ WorkerW 방식은 공개된 Windows 바탕화면 API가 아니므로 Windows/Exp
 
 바탕화면 출력 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --desktop "Live Gamer BOLT"`. 장치를 열어 바탕화면에 붙이고, 열린 창을 잠시 최소화한 뒤 실제 화면을 캡처해 수신한 프레임과 비교합니다(`--aspect 4:3`을 붙이면 검은 여백까지 확인). `artifacts/desktop-capture.png`에 그때의 화면을 남깁니다. 창을 최소화했다가 되돌리므로 자동 검증에는 포함하지 않습니다. 프레임 수신만으로는 화면 출력이 증명되지 않기 때문에 필요한 검사입니다.
 
+처리량 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --bench "Live Gamer BOLT"`. 1080p·1440p·4K에서 실제로 받은 초당 프레임과 MB/s를 보고합니다. 장치가 내보내는 속도보다 느리면 그 차이만큼 프레임이 큐에 쌓여 지연이 됩니다. 지연 문제는 여기서 먼저 확인하세요.
+
 실제 장치 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. 10초간 NV12/Rec.709/Limited/1080p60으로 열어 프레임 수신을 검사합니다. `--snapshot`을 추가하면 로컬 `artifacts/capture-nv12-rec709.png`에 한 프레임을 저장합니다. 기본 앱은 화면을 녹화하거나 저장하지 않습니다.
+
+2026-09-19 4K 지연 수정: 4K에서 지연이 심하던 원인은 리디렉션된 stdout 파이프의 처리량 한계였습니다. 이름 있는 파이프로 바꿔 4K 수신이 24.3fps에서 59.9fps(1895MB/s)로 올랐고, 렌더러를 타이머 폴링에서 프레임 도착 시점 표시로 바꿔 화면 출력이 39fps에서 53.5fps가 됐습니다. DirectShow 큐 크기도 입력 형식 기준으로 고쳐, 150ms 설정이 4K에서 298MB(24프레임)가 아니라 112MB(9프레임)가 됩니다. 배포본에서 4K 적용까지 확인했습니다.
 
 2026-09-19 바탕화면 출력 수정: 캡처가 바탕화면에 전혀 나오지 않던 문제를 GDI 렌더러에서 DXGI 스왑 체인으로 바꿔 해결했습니다. `--desktop` 검증에서 실제 화면 픽셀의 95%가 수신 프레임과 일치했고, 4:3에서 여백도 검게 나왔습니다. 배포본을 실행해 **바탕화면 적용**까지 눌러 Live Gamer BOLT 화면이 바탕화면에 나오는 것을 확인했습니다. 자동 검증 전체 통과.
 
