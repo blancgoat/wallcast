@@ -17,25 +17,33 @@ internal static class Program
                 Application.EnableVisualStyles();
                 using var form = new MainForm();
                 form.Show();
-                // Capture is the default input, so the capture settings are already the ones on show.
                 Application.DoEvents();
-                using var preview = new Bitmap(form.Width, form.Height);
-                form.DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size));
-                preview.Save("artifacts/settings-preview.png", ImageFormat.Png);
+                var hidden = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                Control Field(string name) => (Control)typeof(MainForm).GetField(name, hidden)!.GetValue(form)!;
                 // A greyed grid has to say why, and a disabled control cannot hold a tooltip itself, so
                 // the reason hangs on the grid behind the cells and on the caption beside them.
-                var hidden = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
                 var tips = (ToolTip)typeof(MainForm).GetField("anchorTips", hidden)!.GetValue(form)!;
-                var grid = (Control)typeof(MainForm).GetField("anchorGrid", hidden)!.GetValue(form)!;
-                var caption = (Control?)typeof(MainForm).GetField("anchorCaption", hidden)!.GetValue(form);
                 var cells = (RadioButton[])typeof(MainForm).GetField("anchorCells", hidden)!.GetValue(form)!;
-                var live = cells[0].Enabled;
-                var reason = tips.GetToolTip(grid) ?? "";
+                var chooser = (ComboBox)Field("mode");
                 if (!tips.ShowAlways) throw new Exception("Tooltips would stay hidden unless the window is active");
-                if (live && reason.Length > 0) throw new Exception("A usable grid should not explain itself away");
-                if (!live && reason.Length < 20) throw new Exception("A greyed grid must say why: " + reason);
-                if (caption is null || (tips.GetToolTip(caption) ?? "").Length < 20) throw new Exception("The caption carries no explanation");
-                Console.WriteLine($"PASS: Capture settings form rendered (anchor grid {(live ? "live" : "greyed: " + reason)})");
+                // Placement is asked of both inputs now, so it has to survive the switch between them.
+                foreach (var (index, name) in new[] { (0, "capture"), (1, "video") })
+                {
+                    chooser.SelectedIndex = index;
+                    Application.DoEvents();
+                    using var preview = new Bitmap(form.Width, form.Height);
+                    form.DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size));
+                    preview.Save($"artifacts/settings-{name}.png", ImageFormat.Png);
+                    if (index == 0) preview.Save("artifacts/settings-preview.png", ImageFormat.Png);
+                    if (!Field("layoutSettings").Visible) throw new Exception($"The placement settings are hidden in {name} mode");
+                    if (Field("captureSettings").Visible != (index == 0)) throw new Exception($"The capture settings belong only to capture, not {name}");
+                    var live = cells[0].Enabled;
+                    var reason = tips.GetToolTip(Field("anchorGrid")) ?? "";
+                    if (live && reason.Length > 0) throw new Exception("A usable grid should not explain itself away");
+                    if (!live && reason.Length < 20) throw new Exception("A greyed grid must say why: " + reason);
+                    if ((tips.GetToolTip(Field("anchorCaption")) ?? "").Length < 20) throw new Exception("The caption carries no explanation");
+                    Console.WriteLine($"PASS: {name} settings rendered with placement on show (anchor grid {(live ? "live" : "greyed: " + reason)})");
+                }
                 return 0;
             }
             // Guards the regression this mode was written for: frames can arrive and the control can
@@ -50,10 +58,10 @@ internal static class Program
                 var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault();
                 var res = args.SkipWhile(a => a != "--resolution").Skip(1).FirstOrDefault();
                 var custom = args.SkipWhile(a => a != "--custom").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
-                var mode = args.Contains("--squeeze") ? CaptureOptions.StretchFill : args.Contains("--pixels") ? CaptureOptions.Centred : CaptureOptions.FillCrop;
+                var mode = args.Contains("--squeeze") ? Placement.StretchFill : args.Contains("--pixels") ? Placement.Centred : Placement.FillCrop;
                 var anchor = args.SkipWhile(a => a != "--anchor").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? "Center";
                 var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
-                    Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Custom,
+                    Aspect: custom is null ? chosen ?? Placement.Aspects[0] : Placement.Custom,
                     CustomSize: custom ?? "1920x1080", CustomMode: mode, Anchor: anchor).Normalize();
                 Console.WriteLine($"AREA: aspect={settings.Aspect} custom={settings.CustomSize}/{settings.CustomMode}/{settings.Anchor} crop={settings.Crop} output={settings.OutputSize} -> {settings.Fit(Screen.PrimaryScreen!.Bounds.Size)}");
                 var area = settings.Fit(Screen.PrimaryScreen!.Bounds.Size);
@@ -152,6 +160,131 @@ internal static class Program
                 Application.Run();
                 return result;
             }
+            // The loop is where a video wallpaper gives itself away: restarting the player throws the
+            // video output away, and for as long as that takes there is a hole in the desktop with the
+            // real wallpaper behind it. Only watching the screen across several loops can prove it gone.
+            if (args.Contains("--video"))
+            {
+                Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+                Application.EnableVisualStyles();
+                var given = args.SkipWhile(a => a != "--video").Skip(1).Take(1).FirstOrDefault(a => !a.StartsWith("--"));
+                // The fixture clip is one flat colour, which is what lets the picture be measured on
+                // screen. A file the caller brought is played and watched, but not measured.
+                var file = given ?? Clip(args.SkipWhile(a => a != "--seconds").Skip(1).FirstOrDefault() is { } d ? int.Parse(d) : 2);
+                var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+                var custom = args.SkipWhile(a => a != "--custom").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+                var mapping = args.Contains("--squeeze") ? Placement.StretchFill : args.Contains("--pixels") ? Placement.Centred
+                    : args.Contains("--pad") ? Placement.FitPad : Placement.FillCrop;
+                var anchor = args.SkipWhile(a => a != "--anchor").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? "Center";
+                var layout = new Placement(custom is null ? chosen ?? Placement.AsCaptured : Placement.Custom,
+                    custom ?? "1440x1080", mapping, anchor).Normalize();
+                using var dispatcher = new Control();
+                _ = dispatcher.Handle;
+                using var playback = new Playback(dispatcher);
+                // Off the UI thread: the parse completes on a VLC thread and would post its
+                // continuation straight back to a message loop that is not running yet.
+                var frame = Task.Run(() => VideoProbe.Measure(file)).GetAwaiter().GetResult();
+                if (frame is null) { Console.WriteLine("FAIL: could not measure " + file); return 2; }
+                var bounds = Screen.PrimaryScreen!.Bounds;
+                var window = layout.Fit(frame.Value, bounds.Size);
+                Console.WriteLine($"AREA: {file} {frame.Value.Width}x{frame.Value.Height} aspect={layout.Aspect} " +
+                    $"custom={layout.CustomSize}/{layout.CustomMode}/{layout.Anchor} crop={layout.Crop(frame.Value)} -> {window}");
+                window.Offset(bounds.Location);
+                playback.Status += text => Console.WriteLine("STATUS: " + text);
+                playback.Start(new VideoSource(file, layout, frame), Screen.PrimaryScreen!, true);
+                var outcome = 2;
+                var watch = new System.Windows.Forms.Timer { Interval = 2500 };
+                watch.Tick += (_, _) =>
+                {
+                    watch.Stop();
+                    object? shell = null;
+                    try
+                    {
+                        if (!args.Contains("--stay"))
+                        {
+                            shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
+                            shell!.GetType().InvokeMember("MinimizeAll", System.Reflection.BindingFlags.InvokeMethod, null, shell, null);
+                        }
+                        for (var i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(50); }
+                        var middle = new Point(window.X + window.Width / 2, window.Y + window.Height / 2);
+                        // A window still standing over the picture would read as a hole that is not one.
+                        // Only the points actually read matter: a picture that takes the whole monitor
+                        // always has the taskbar somewhere over it, and that is not a reason to give up.
+                        var covers = CoveringWindows();
+                        Point[] edges = [new(window.X + 2, middle.Y), new(window.Right - 3, middle.Y),
+                            new(middle.X, window.Y + 2), new(middle.X, window.Bottom - 3)];
+                        if (covers.Any(cover => cover.Contains(middle)))
+                        { Console.WriteLine("SKIP: something is covering the picture, cannot verify"); return; }
+                        // A picture that takes the whole monitor always has the taskbar over an edge.
+                        // That is no reason to abandon the loop test, only the geometry that needs them.
+                        var edged = !edges.Any(point => covers.Any(cover => cover.Contains(point)));
+                        var expected = Patch(middle);
+                        Console.WriteLine($"COLOUR: the picture reads #{expected:X6} at its centre");
+                        // Saved before anything is judged, so a failure leaves something to look at.
+                        Rectangle drawn = Rectangle.Empty, covered = Rectangle.Empty;
+                        using (var screen = new Bitmap(bounds.Width, bounds.Height))
+                        {
+                            using (var g = Graphics.FromImage(screen)) g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
+                            screen.Save("artifacts/desktop-video.png", ImageFormat.Png);
+                            if (given is null) { drawn = Drawn(screen, window, expected, false); covered = Drawn(screen, window, expected, true); }
+                        }
+                        // Measured rather than merely asserted, so a miss says by how much. The picture
+                        // has to reach the window's own edges: anything short of them is either a bar
+                        // that should have been cropped or a hole the wallpaper shows through.
+                        if (given is null)
+                            Console.WriteLine($"PICTURE: {drawn.Width} x {drawn.Height} at ({drawn.X}, {drawn.Y}), " +
+                                $"painted {covered.Width} x {covered.Height}, " +
+                                $"in a {window.Width} x {window.Height} window at ({window.X}, {window.Y})");
+                        var duration = Seconds(file);
+                        // Watched flat out rather than on a timer: the seam this is looking for is one
+                        // frame wide, and a timer would step straight over it.
+                        long samples = 0, holes = 0;
+                        var clock = Stopwatch.StartNew();
+                        var span = Math.Max(8.0, duration * 4 + 2);
+                        while (clock.Elapsed.TotalSeconds < span)
+                        {
+                            samples++;
+                            if (Far(Patch(middle), expected, 40)) holes++;
+                            if (samples % 32 == 0) Application.DoEvents();
+                        }
+                        var seams = Math.Max(1, (int)(span / Math.Max(0.1, duration)));
+                        Console.WriteLine($"LOOP: {samples} screen reads over {clock.Elapsed.TotalSeconds:F1}s " +
+                            $"({seams} loops of a {duration:F1}s clip), {holes} of them showed something other than the picture");
+                        if (samples < 200) { Console.WriteLine("SKIP: too few reads to judge the loop"); return; }
+                        if (holes * 200 > samples) { Console.WriteLine("FAIL: the picture disappears, most likely at the loop"); return; }
+                        // Whatever the mode, the window has to be painted corner to corner: anything it
+                        // leaves is not black, it is a hole with the real wallpaper behind it.
+                        if (given is null && !edged) Console.WriteLine("GEOMETRY: an edge is covered, so only the loop was judged");
+                        if (given is null && edged && (covered.Width < window.Width - 2 || covered.Height < window.Height - 2))
+                        {
+                            Console.WriteLine($"FAIL: the window is painted only {covered.Width} x {covered.Height}, " +
+                                "so the wallpaper shows through around the picture");
+                            return;
+                        }
+                        // Where the mode crops, the bars are meant to be gone, so the picture itself has
+                        // to reach the edges rather than merely something black.
+                        if (given is null && edged && layout.Crop(frame.Value).Size != frame.Value
+                            && (drawn.Width < window.Width - 2 || drawn.Height < window.Height - 2))
+                        {
+                            Console.WriteLine($"FAIL: the picture is {window.Width - drawn.Width} x {window.Height - drawn.Height} " +
+                                "short of its window, so the bars were not cropped off");
+                            return;
+                        }
+                        Console.WriteLine("PASS: the video is live on the desktop and survives its own loop (artifacts/desktop-video.png)");
+                        outcome = 0;
+                    }
+                    catch (Exception ex) { Console.WriteLine("FAIL: " + ex.Message); }
+                    finally
+                    {
+                        try { shell?.GetType().InvokeMember("UndoMinimizeALL", System.Reflection.BindingFlags.InvokeMethod, null, shell, null); } catch { }
+                        playback.Stop();
+                        Application.Exit();
+                    }
+                };
+                watch.Start();
+                Application.Run();
+                return outcome;
+            }
             if (args.Contains("--bench"))
             {
                 var name = args.SkipWhile(a => a != "--bench").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? CaptureDevices.Enumerate()[0];
@@ -217,7 +350,7 @@ internal static class Program
             if (new CaptureOptions().Fit(screen) != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Uncropped geometry distorted");
             // A 4:3 source pillarboxed into a 3840x2160 frame has exactly 480px of bar each side, and an
             // output resolution of 2732x2048 asks for the picture at exactly that size.
-            var pillar = new CaptureOptions(Resolution: "3840x2160", Aspect: CaptureOptions.Custom, CustomSize: "2732x2048");
+            var pillar = new CaptureOptions(Resolution: "3840x2160", Aspect: Placement.Custom, CustomSize: "2732x2048");
             if (pillar.Crop != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Pillarbox not cropped off: " + pillar.Crop);
             if (pillar.Fit(screen).Size != new Size(2732, 2048)) throw new Exception("Fill did not land on the output size: " + pillar.Fit(screen));
             if (!pillar.ConversionFilter.StartsWith("crop=2880:2160:480:0,")) throw new Exception("Crop missing from the filter chain");
@@ -244,30 +377,107 @@ internal static class Program
             var huge = pillar with { CustomSize = "7680x5760" };
             if (huge.Fit(screen) != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Oversized output not bounded: " + huge.Fit(screen));
             // Centre keeps one source pixel per screen pixel and never scales up to the output size.
-            var exact = pillar with { CustomMode = CaptureOptions.Centred };
+            var exact = pillar with { CustomMode = Placement.Centred };
             if (exact.Crop != new Rectangle(554, 56, 2732, 2048)) throw new Exception("Centre cut " + exact.Crop);
             if (exact.Fit(screen).Size != new Size(2732, 2048)) throw new Exception("Centre did not stay 1:1");
             if ((exact with { Resolution = "1920x1080" }).Fit(screen).Size != new Size(1920, 1080))
                 throw new Exception("Centre should not invent pixels the capture does not have");
             // Fit keeps the whole frame and shrinks it until it sits inside the output.
-            var padded = pillar with { CustomMode = CaptureOptions.FitPad };
+            var padded = pillar with { CustomMode = Placement.FitPad };
             if (padded.Crop != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Fit should not crop");
             if (padded.Fit(screen).Size != new Size(2732, 1537)) throw new Exception("Fit landed on " + padded.Fit(screen).Size);
             // Stretching an anamorphic frame crops nothing and fills the output exactly, distortion included.
-            var squeezed = pillar with { CustomMode = CaptureOptions.StretchFill };
+            var squeezed = pillar with { CustomMode = Placement.StretchFill };
             if (squeezed.Crop != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Stretch should not crop");
             if (squeezed.ConversionFilter.Contains("crop=")) throw new Exception("Stretch should not add a crop filter");
             if (squeezed.Fit(screen).Size != new Size(2732, 2048)) throw new Exception("Stretch did not fill the output");
-            Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors");
+            // A video file is placed by exactly the same arithmetic, with the shape the file turned out
+            // to be standing in for the capture resolution. The two must never disagree.
+            var clip = new Size(1920, 1080);
+            var shared = new Placement(Placement.Custom, "1440x1080", Placement.FillCrop, "Center");
+            if (shared.Crop(clip) != new Rectangle(240, 0, 1440, 1080)) throw new Exception("Pillarbox not cropped off a video: " + shared.Crop(clip));
+            if (shared.Fit(clip, screen) != new Rectangle(1200, 540, 1440, 1080)) throw new Exception("Video placed at " + shared.Fit(clip, screen));
+            var twin = new CaptureOptions(Resolution: "1920x1080", Aspect: Placement.Custom, CustomSize: "1440x1080");
+            if (twin.Crop != shared.Crop(clip) || twin.Fit(screen) != shared.Fit(clip, screen))
+                throw new Exception("A video and a capture of the same shape were placed differently");
+            if ((shared with { Anchor = "Bottom left" }).Fit(clip, screen).Location != new Point(0, 1080))
+                throw new Exception("Anchors do not reach the video path");
+            Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors, shared by video and capture");
             TestColors();
             using var control = new Control();
-            using var playback = new Playback(control);
-            playback.Stop(); playback.Stop();
+            using var idle = new Playback(control);
+            idle.Stop(); idle.Stop();
             Console.WriteLine("PASS: Idle playback cleanup is repeatable");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }
+
+    // A known clip beats whatever happens to be lying around: 240px of black bar either side of a
+    // solid colour, which is the pillarbox this app exists to remove, and short enough to loop often.
+    private static string Clip(int seconds)
+    {
+        var file = Path.GetFullPath($"artifacts/loop-clip-{seconds}s.mp4");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        if (File.Exists(file)) return file;
+        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "capture", "ffmpeg.exe"))
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
+        foreach (var arg in new[] { "-y", "-v", "error", "-f", "lavfi", "-i", $"color=c=0x2060F0:s=1440x1080:r=30:d={seconds}",
+            "-vf", "pad=1920:1080:240:0:black", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", file })
+            info.ArgumentList.Add(arg);
+        using var process = Process.Start(info)!;
+        var trouble = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0) throw new Exception("Could not build a test clip: " + trouble);
+        return file;
+    }
+
+    private static double Seconds(string file)
+    {
+        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "capture", "ffmpeg.exe"))
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
+        foreach (var arg in new[] { "-hide_banner", "-i", file }) info.ArgumentList.Add(arg);
+        using var process = Process.Start(info)!;
+        var text = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        var match = System.Text.RegularExpressions.Regex.Match(text, @"Duration: (\d+):(\d+):(\d+\.\d+)");
+        return match.Success
+            ? int.Parse(match.Groups[1].Value) * 3600 + int.Parse(match.Groups[2].Value) * 60 + double.Parse(match.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture)
+            : 2;
+    }
+
+    // An 8x8 mean rather than one pixel, so dithering and scaling do not read as a hole.
+    private static readonly Bitmap Swatch = new(8, 8);
+    private static readonly Graphics Lens = Graphics.FromImage(Swatch);
+    private static int Patch(Point at)
+    {
+        Lens.CopyFromScreen(new Point(at.X - 4, at.Y - 4), Point.Empty, new Size(8, 8));
+        int r = 0, g = 0, b = 0;
+        for (var y = 0; y < 8; y++)
+            for (var x = 0; x < 8; x++)
+            { var pixel = Swatch.GetPixel(x, y); r += pixel.R; g += pixel.G; b += pixel.B; }
+        return (r / 64 << 16) | (g / 64 << 8) | b / 64;
+    }
+
+    // How far the picture reaches inside the window it was given, walked in from all four edges.
+    // With bars counted it measures what is painted at all; without them, the picture proper.
+    private static Rectangle Drawn(Bitmap screen, Rectangle window, int colour, bool countBars)
+    {
+        int At(int x, int y) { var pixel = screen.GetPixel(x, y); return (pixel.R << 16) | (pixel.G << 8) | pixel.B; }
+        bool Bar(int pixel) => countBars && (pixel >> 16 & 255) + (pixel >> 8 & 255) + (pixel & 255) < 60;
+        bool Blank(int x, int y) { var pixel = At(x, y); return Far(pixel, colour, 60) && !Bar(pixel); }
+        int middleY = window.Y + window.Height / 2, middleX = window.X + window.Width / 2;
+        int left = window.X, right = window.Right - 1, top = window.Y, bottom = window.Bottom - 1;
+        while (left < right && Blank(left, middleY)) left++;
+        while (right > left && Blank(right, middleY)) right--;
+        while (top < bottom && Blank(middleX, top)) top++;
+        while (bottom > top && Blank(middleX, bottom)) bottom--;
+        return Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+    }
+
+    private static bool Far(int one, int other, int tolerance) =>
+        Math.Abs((one >> 16 & 255) - (other >> 16 & 255)) + Math.Abs((one >> 8 & 255) - (other >> 8 & 255))
+            + Math.Abs((one & 255) - (other & 255)) > tolerance;
 
     private static byte[] ConvertNv12(byte y, byte u, byte v, CaptureOptions options)
     {

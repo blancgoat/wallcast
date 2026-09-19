@@ -15,7 +15,7 @@ A small live wallpaper app for Windows. Point it at a capture card or virtual ca
 3. Pick the output monitor and press **Apply to desktop**.
 4. **Stop** brings your original wallpaper back. The window's X hides to the tray; **Exit** in the tray menu quits for real.
 
-Video keeps its own aspect ratio and loops. It is muted by default and can be unmuted. Capture is video only. The capture buffer value sets the DirectShow queue capacity and is not an exact latency figure. That capacity is worked out from the frame size of the format the device emits, so the same value holds the same number of frames as the resolution goes up. The screen always shows the newest frame, presented as soon as it arrives.
+Video keeps its own shape and loops without a seam: the player repeats the file itself rather than being stopped and started, which used to leave the desktop bare for about a fifth of a second every time round. It is muted by default and can be unmuted. Either input can be placed on the monitor the same way; see [Placement](#placement). Capture is video only. The capture buffer value sets the DirectShow queue capacity and is not an exact latency figure. That capacity is worked out from the frame size of the format the device emits, so the same value holds the same number of frames as the resolution goes up. The screen always shows the newest frame, presented as soon as it arrives.
 
 ### Capture settings
 
@@ -26,18 +26,27 @@ Video keeps its own aspect ratio and loops. It is muted by default and can be un
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Input HDR / peak | **SDR**, HDR10 / PQ → SDR, HLG → SDR · **1000** nits |
-| Display aspect | **Input resolution**, Stretch to screen, Output resolution |
-| Output size / mapping | e.g. `2753x2064` · **Fill, cropping the overflow**, Fit / Centre at 1:1 / Stretch to fill |
-| Screen position | 3x3 grid, **Center** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
 For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. If the card pillarboxes a 4:3 source into its 16:9 frame, set **Display aspect** to `Output resolution` with `Fill, cropping the overflow` and those bars come off.
 
-**Display aspect** decides what happens to the captured frame before it reaches the desktop.
+### Placement
+
+| Setting | Choices / default |
+| --- | --- |
+| Display aspect | **Input resolution**, Stretch to screen, Output resolution |
+| Output size / mapping | e.g. `2753x2064` · **Fill, cropping the overflow**, Fit / Centre at 1:1 / Stretch to fill |
+| Screen position | 3x3 grid, **Center** |
+
+These three belong to either input and stay on show for both. A capture is placed by the resolution you
+chose for it; a video file is placed by the shape the file turns out to be, which is read off the file
+with the bundled FFmpeg as soon as you choose it, anamorphic pixels included.
+
+**Display aspect** decides what happens to the frame before it reaches the desktop.
 `Input resolution` leaves it alone. `Stretch to screen` fills the monitor and distorts to do it.
 `Output resolution` is the one that behaves like OBS: you give a size such as `2753x2064` and the
-picture comes out at that size **whatever the capture resolution is**. Capture at 1920x1080 or at
+picture comes out at that size **whatever the source resolution is**. Capture at 1920x1080 or at
 3840x2160 and the result is still 2753x2064; only how much detail went into it changes. **Output
 mapping** says how the frame is laid into that rectangle, always centred inside it:
 
@@ -48,7 +57,7 @@ mapping** says how the frame is laid into that rectangle, always centred inside 
   shape mismatch shows up as a gap rather than as a missing edge.
 - `Centre at 1:1, padding the gap` does not scale at all. It takes as much of the middle of the frame as
   the output has room for and draws it one source pixel per screen pixel, so it never grows past what
-  the capture actually has: a 1920x1080 capture stays 1920x1080 even if the output asks for more.
+  the source actually has: a 1920x1080 frame stays 1920x1080 even if the output asks for more.
 - `Stretch to fill, distorting` keeps the whole frame and stretches it onto the output exactly. This is
   the one for an older card that squeezes the source into its frame instead of pillarboxing it, where
   there is nothing to cut and the picture only needs its proportions back.
@@ -61,18 +70,21 @@ big it is drawn and where - so there is no need to guess which reading is in for
 
 **Screen position** is the 3x3 grid, read like a canvas-size anchor: it decides where on the monitor the
 picture sits. It places the output rectangle; what goes inside that rectangle is always centred. It can
-only do something where the picture leaves room, so the grid greys out when there is none - a 16:9 capture shown whole on a 16:9 monitor already covers every pixel, and so does anything
-stretched to the screen. The crop itself always comes out of the middle of the frame, because that is
-where a pillarbox puts the bars.
+only do something where the picture leaves room, so the grid greys out when there is none - a 16:9 source shown whole on a 16:9 monitor already covers every pixel, and so does anything
+stretched to the screen. In video mode it also greys out until a file has been chosen, because until
+then there is no shape to place. The crop itself always comes out of the middle of the frame, because
+that is where a pillarbox puts the bars.
 
-`Input resolution` and `Stretch to screen` look identical whenever the capture is the same shape as the
+`Input resolution` and `Stretch to screen` look identical whenever the source is the same shape as the
 monitor, which is the usual case. They part company as soon as it is not: a 640x480 capture on a 16:9
 monitor is drawn 4:3 and undistorted by the first, and stretched to fill by the second.
 
 There are no fixed 16:9 / 4:3 entries. Under cropping they would only be a clumsier output resolution, and
 if a fixed ratio is ever wanted it will be wanted as a stretch, not a crop.
 
-Cropping happens in the capture engine, so the bars never travel down the pipe in the first place.
+Cropping a capture happens in the capture engine, so the bars never travel down the pipe in the first
+place. Cropping a video happens in the player, which costs nothing, because the decoder was going to
+hand over a whole frame either way.
 
 Whatever the picture does not cover is **not drawn on**. The app's window is only as large as the
 picture, so the surround is still the wallpaper Windows was already showing - no black bars. Set the
@@ -122,8 +134,10 @@ licence and where its source lives. Keep both in any archive you distribute.
 ## Scope and layout
 
 - `Sources.cs`: the file and capture input models.
-- `Playback.cs`: picks the playback path per input, LibVLC video playback, looping, errors and cleanup.
-- `CaptureOptions.cs`: pixel format, resolution, FPS, YUV conversion, and the crop that takes the capture card's black bars off.
+- `Placement.cs`: output resolution, mapping mode and screen anchor. Shared, so a video file and a capture of the same shape are placed by the same arithmetic.
+- `Playback.cs`: picks the playback path per input, LibVLC video playback, seamless looping, the crop and display aspect it hands the player, errors and cleanup.
+- `VideoProbe.cs`: reads a video file's displayed shape out of the bundled FFmpeg, so a file can be placed like a capture.
+- `CaptureOptions.cs`: pixel format, resolution, FPS and YUV conversion, plus the crop that takes the capture card's black bars off. The geometry itself belongs to `Placement.cs`.
 - `CapturePlayback.cs`: FFmpeg DirectShow input, explicit color conversion, keeps the newest frame. Frames arrive over a named pipe. A redirected stdout pipe has a small buffer and stalls near 800 MB/s, while 4K 60fps BGRA needs 2.0 GB/s.
 - `CaptureSurface.cs`: presents BGRA frames through a DXGI flip-model swap chain and keeps the aspect ratio. Scaling runs on the GPU.
 - `DesktopHost.cs`: attaches the video window to the Windows Explorer WorkerW.
@@ -142,7 +156,7 @@ The WorkerW approach is not a public Windows wallpaper API, so behaviour varies 
 
 ## Verification
 
-The automatic checks run with `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true`. They cover VLC loading, device discovery, invalid input, output resolution and every mapping mode, screen anchors, real FFmpeg NV12 red/blue conversion, Limited/Full, the Rec.709/601 difference, and repeatable playback cleanup.
+The automatic checks run with `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true`. They cover VLC loading, device discovery, invalid input, output resolution and every mapping mode, screen anchors, that a video file and a capture of the same shape are placed identically, real FFmpeg NV12 red/blue conversion, Limited/Full, the Rec.709/601 difference, and repeatable playback cleanup.
 
 By hand:
 
@@ -159,9 +173,24 @@ Desktop output check: `dotnet run --project SmokeTests -c Release -r win-x64 --s
 
 That check excludes the area of any window that refused to minimise, and reports SKIP rather than a failure when less than 20% of the wallpaper was uncovered. With a moving source the moment of the screen grab and the moment a frame arrives do not line up, so it compares against the best of several frames taken either side of the grab. Without both of those a perfectly good renderer looks broken.
 
+Video output check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --video`. It builds a two second clip with 240px of black bar either side of a solid colour - the pillarbox this app exists to remove - plays it on the desktop, and then reads the screen flat out for ten seconds, five times round the loop. Every read that is not the picture is a hole, and a hole at the loop is the bug this check exists for: the old stop-and-restart loop showed 117 of 1176 reads bare, and repeating the input shows 0 of 1201. It also measures how far the picture reaches inside the window it was given, which catches both an uncropped bar and a gap the wallpaper shows through. `--custom 1440x1080` sets an output resolution (`--pad`, `--pixels`, `--squeeze` for the other three mappings), `--aspect` and `--anchor Left` work as above, `--seconds` sets the clip length, and a path right after `--video` plays that file instead, in which case the geometry is reported but not judged. The grab is saved to `artifacts/desktop-video.png`. Like the capture check it minimises windows, so it is not part of the automatic run.
+
+Form check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --ui-preview`. It renders the settings window in both input modes to `artifacts/settings-capture.png` and `artifacts/settings-video.png`, and fails if the placement settings go missing from either, if the capture settings show up in video mode, or if the greyed-out anchor grid carries no explanation of why.
+
 Throughput check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --bench "Live Gamer BOLT"`. It reports frames per second and MB/s actually received at 1080p, 1440p and 4K. Anything slower than the device emits means that difference in frames piling up in the queue as latency. Start here for latency problems.
 
 Real device check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. It opens NV12/Rec.709/Limited/1080p60 for ten seconds and checks that frames arrive. Adding `--snapshot` saves one frame to `artifacts/capture-nv12-rec709.png`. The app itself never records or saves the screen.
+
+2026-09-20, video parity. The video path caught up with capture. It takes the same output resolution,
+mapping and screen position, placed by the same arithmetic against the shape the file turns out to be,
+read off the file with FFmpeg rather than by opening it a second time in the player. Its loop stopped
+showing the desktop: repeating the input keeps the video output alive across the seam, where stopping
+and restarting the player tore it down and left a hole for about 200ms - 117 of 1176 screen reads
+before, 0 of 1201 after. Two things about VLC had to be measured rather than assumed: it reads a crop
+written as `WxH+X+Y` as edges rather than as an origin and a size, which made a 1440-wide crop come out
+1200 wide, and it works the display aspect out from the whole decoded frame rather than from the part
+the crop left. Both are corrected, and all four mappings now land the picture exactly on its window at
+1440x1080, 1920x1080, 1200x900 and 1920x600. All automatic checks pass.
 
 2026-09-20, 1.0.0. The surround is no longer painted: the window is only as big as the picture, so
 whatever it does not cover stays the wallpaper Windows was already showing. Display aspect became a crop

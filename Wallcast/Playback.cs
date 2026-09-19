@@ -54,17 +54,48 @@ internal sealed class Playback : IDisposable
                 capture.Start();
                 return;
             }
-            host.Attach(screen);
+            var video = (VideoSource)input;
+            var layout = (video.Layout ?? new Placement()).Normalize();
+            // An unmeasured file gets the monitor, which is what every version before this one did.
+            var frame = video.Frame ?? screen.Bounds.Size;
+            var window = layout.Fit(frame, screen.Bounds.Size);
+            var placed = window;
+            placed.Offset(screen.Bounds.Location);
+            host.Attach(screen, placed);
             player = new MediaPlayer(engine) { Hwnd = host.Handle, Mute = mute };
             player.EnableKeyInput = false;
             player.EnableMouseInput = false;
-            player.Playing += (_, _) => Post(current, () => Status?.Invoke("Playing on the desktop"));
+            // The capture path cuts the bars off in ffmpeg; here VLC does it, which costs nothing
+            // because the decoder was going to hand the vout a whole frame either way. It is written
+            // as four borders to cut away rather than as "WxH+X+Y", which VLC reads as edges rather
+            // than as an origin and a size: asked for 1440 wide at x=240 it gave back 1200.
+            var cut = layout.Crop(frame);
+            player.CropGeometry = cut.Size == frame ? null
+                : $"{cut.X}+{cut.Y}+{frame.Width - cut.Right}+{frame.Height - cut.Bottom}";
+            // Anything VLC has left over after fitting the picture to the window it pads, and that
+            // padding is not drawn through the swap chain, so it comes out as a hole with the real
+            // wallpaper behind it. Declaring the window's own shape as the display aspect leaves
+            // nothing to pad: the two stretch modes distort to fill, and the rest are already this
+            // shape bar the pixel that rounding the placement cost them.
+            //
+            // The correction is for VLC working the display aspect out from the whole decoded frame
+            // rather than from the part the crop left: asking for the window's ratio outright would
+            // squeeze the picture by exactly the ratio between the two, which shows up as a
+            // pillarbox of bare wallpaper. Where nothing is cropped the frame terms cancel and this
+            // is simply the window's own ratio.
+            var wide = (long)window.Width * cut.Height * frame.Width;
+            var high = (long)window.Height * cut.Width * frame.Height;
+            var factor = Gcd(wide, high);
+            player.AspectRatio = Ratio(wide / factor, high / factor);
+            player.Playing += (_, _) => Post(current, () => Status?.Invoke(
+                $"Playing on the desktop · {frame.Width} × {frame.Height} drawn {window.Width} × {window.Height} at ({window.X}, {window.Y})"));
             player.EncounteredError += (_, _) => Post(current, () =>
             {
                 var detail = string.Join(Environment.NewLine, errors);
                 Stop();
                 Status?.Invoke("Playback failed: " + (string.IsNullOrWhiteSpace(detail) ? "Could not open the input. Check the device connection and its signal." : detail));
             });
+            // The media repeats itself, so this is only reached once the repeat count runs out.
             player.EndReached += (_, _) => Post(current, () =>
             {
                 if (source?.Loop == true) { player!.Stop(); Play(); }
@@ -73,6 +104,23 @@ internal sealed class Playback : IDisposable
             Play();
         }
         catch { Stop(); throw; }
+    }
+
+    private static long Gcd(long one, long other) => other == 0 ? one : Gcd(other, one % other);
+
+    // VLC multiplies these by a frame dimension in 32 bits, so a ratio that did not reduce to small
+    // numbers would overflow there and come back as nonsense. Capped, the rounding is worth well
+    // under a pixel across any screen.
+    private static string Ratio(long wide, long high)
+    {
+        const long cap = 100_000;
+        var most = Math.Max(wide, high);
+        if (most > cap)
+        {
+            wide = Math.Max(1, (long)Math.Round((double)wide * cap / most));
+            high = Math.Max(1, (long)Math.Round((double)high * cap / most));
+        }
+        return $"{wide}:{high}";
     }
 
     private void Play()

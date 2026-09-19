@@ -18,23 +18,28 @@ internal sealed class MainForm : Form
     private readonly FlowLayoutPanel captureRow = Row();
     private readonly FlowLayoutPanel cacheRow = Row();
     private readonly TableLayoutPanel captureSettings = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, Margin = new Padding(0, 8, 0, 0) };
+    // Placement is asked of both inputs, so it lives in its own table that neither mode hides.
+    private readonly TableLayoutPanel layoutSettings = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, Margin = new Padding(0, 8, 0, 0) };
     private readonly ComboBox format = Choice(CaptureOptions.Formats);
     private readonly ComboBox resolution = Choice(CaptureOptions.Resolutions);
     private readonly ComboBox fps = Choice(CaptureOptions.FrameRates);
     private readonly ComboBox colorSpace = Choice(CaptureOptions.ColorSpaces);
     private readonly ComboBox colorRange = Choice(CaptureOptions.ColorRanges);
-    private readonly ComboBox aspect = Choice(CaptureOptions.Aspects);
+    private readonly ComboBox aspect = Choice(Placement.Aspects);
     private readonly TextBox customSize = new() { Width = 325, Margin = new Padding(3, 4, 3, 4), PlaceholderText = "2732x2048" };
-    private readonly ComboBox customMode = Choice(CaptureOptions.CustomModes);
+    private readonly ComboBox customMode = Choice(Placement.CustomModes);
     // A canvas-size anchor: nine cells, the arrows pointing where on the monitor the picture goes.
     private static readonly string[] AnchorGlyphs = ["↖", "↑", "↗", "←", "●", "→", "↙", "↓", "↘"];
-    private readonly RadioButton[] anchorCells = new RadioButton[CaptureOptions.Anchors.Length];
+    private readonly RadioButton[] anchorCells = new RadioButton[Placement.Anchors.Length];
     private readonly TableLayoutPanel anchorGrid = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 3, Margin = new Padding(3, 4, 3, 4) };
     // Without ShowAlways a tooltip stays hidden unless the window is active, and a disabled control
     // never gets the mouse itself, so the reason is hung on the grid and the caption behind it.
     private readonly ToolTip anchorTips = new() { ShowAlways = true, AutoPopDelay = 15000, InitialDelay = 350 };
     private bool anchorsActive = true;
     private Label? anchorCaption;
+    // A video's shape comes from the file, not from a combo box, so it has to be measured first.
+    private Size? videoFrame;
+    private string probing = "";
     // A size box that sometimes reads as a ratio and sometimes as pixels needs to show its work.
     private readonly Label geometry = new() { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0), Margin = new Padding(0, 8, 0, 0) };
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
@@ -80,9 +85,9 @@ internal sealed class MainForm : Form
         AddCaptureSetting("Color range", colorRange);
         AddCaptureSetting("Input HDR", dynamicRange);
         AddCaptureSetting("HDR peak (nits)", hdrPeak);
-        AddCaptureSetting("Display aspect", aspect);
-        AddCaptureSetting("Output size (W x H)", customSize);
-        AddCaptureSetting("Output mapping", customMode);
+        AddLayoutSetting("Display aspect", aspect);
+        AddLayoutSetting("Output size (W x H)", customSize);
+        AddLayoutSetting("Output mapping", customMode);
         for (var cell = 0; cell < anchorCells.Length; cell++)
         {
             var button = new RadioButton
@@ -92,20 +97,20 @@ internal sealed class MainForm : Form
                 // Flat, because the themed button keeps its blue accent even when disabled, which is
                 // exactly the state that has to be unmistakable here.
                 Appearance = Appearance.Button, FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false,
-                Text = AnchorGlyphs[cell], Tag = CaptureOptions.Anchors[cell],
+                Text = AnchorGlyphs[cell], Tag = Placement.Anchors[cell],
                 Width = 30, Height = 28, Margin = new Padding(1), TextAlign = ContentAlignment.MiddleCenter,
-                Checked = CaptureOptions.Anchors[cell] == "Center"
+                Checked = Placement.Anchors[cell] == "Center"
             };
             button.Click += (sender, _) =>
             {
                 foreach (var other in anchorCells) other.Checked = ReferenceEquals(other, sender);
                 PaintAnchors();
             };
-            anchorTips.SetToolTip(button, CaptureOptions.Anchors[cell]);
+            anchorTips.SetToolTip(button, Placement.Anchors[cell]);
             anchorCells[cell] = button;
             anchorGrid.Controls.Add(button, cell % 3, cell / 3);
         }
-        anchorCaption = AddCaptureSetting("Screen position", anchorGrid);
+        anchorCaption = AddLayoutSetting("Screen position", anchorGrid);
         aspect.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         customMode.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         // Room depends on the capture shape and the monitor too, not just on the aspect choice.
@@ -115,6 +120,8 @@ internal sealed class MainForm : Form
         dynamicRange.SelectedIndexChanged += (_, _) => UpdateHdrControls();
         UpdateHdrControls();
         body.Controls.Add(captureSettings);
+        body.Controls.Add(Caption("Placement"));
+        body.Controls.Add(layoutSettings);
         body.Controls.Add(geometry);
         cacheRow.Controls.Add(new Label { Text = "Capture buffer (ms)", AutoSize = true, Padding = new Padding(0, 5, 10, 0) });
         cacheRow.Controls.Add(cache);
@@ -124,7 +131,7 @@ internal sealed class MainForm : Form
         body.Controls.Add(monitors);
         mute.Margin = new Padding(0, 14, 0, 10);
         body.Controls.Add(mute);
-        body.Controls.Add(new Label { Text = "Keeps the source aspect · video loops · capture is video only", AutoSize = true, ForeColor = Color.DimGray });
+        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · capture is video only", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
         actions.Controls.Add(Button("Apply to desktop", Apply));
@@ -133,6 +140,7 @@ internal sealed class MainForm : Form
         body.Controls.Add(actions);
         body.Controls.Add(status);
         mode.SelectedIndexChanged += (_, _) => UpdateMode();
+        path.TextChanged += (_, _) => ProbeVideo();
         monitors.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         mute.CheckedChanged += (_, _) => playback?.SetMute(mute.Checked);
         var menu = new ContextMenuStrip();
@@ -234,7 +242,7 @@ internal sealed class MainForm : Form
             else
             {
                 if (!File.Exists(path.Text)) throw new InvalidOperationException("Select a video file.");
-                input = new VideoSource(path.Text);
+                input = new VideoSource(path.Text, SelectedPlacement(), videoFrame);
             }
             status.Text = "Opening the input…";
             playback.Start(input, screens[monitors.SelectedIndex], mute.Checked);
@@ -249,10 +257,12 @@ internal sealed class MainForm : Form
         var parent = captureRow.Parent;
         parent?.SuspendLayout();
         fileRow.Visible = !Capturing;
-        captureRow.Visible = cacheRow.Visible = captureSettings.Visible = geometry.Visible = Capturing;
+        captureRow.Visible = cacheRow.Visible = captureSettings.Visible = Capturing;
         mute.Enabled = !Capturing;
         if (parent is not null) parent.Controls.SetChildIndex(captureRow, parent.Controls.GetChildIndex(mode) + 1);
         parent?.ResumeLayout(true);
+        // The frame a placement applies to changes with the mode, so the readout has to be redone.
+        UpdateAspectControls();
     }
     private static ComboBox Choice(string[] values)
     {
@@ -260,31 +270,56 @@ internal sealed class MainForm : Form
         choice.Items.AddRange(values); choice.SelectedIndex = 0;
         return choice;
     }
-    private Label AddCaptureSetting(string text, Control control)
+    private Label AddCaptureSetting(string text, Control control) => AddSetting(captureSettings, text, control);
+    private Label AddLayoutSetting(string text, Control control) => AddSetting(layoutSettings, text, control);
+    private static Label AddSetting(TableLayoutPanel table, string text, Control control)
     {
-        var row = captureSettings.RowCount++;
+        var row = table.RowCount++;
         var caption = new Label { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 22, 0) };
-        captureSettings.Controls.Add(caption, 0, row);
-        captureSettings.Controls.Add(control, 1, row);
+        table.Controls.Add(caption, 0, row);
+        table.Controls.Add(control, 1, row);
         return caption;
+    }
+
+    // What the placement will be applied to: the capture resolution the user picked, or the shape the
+    // chosen video turned out to have. Null means there is nothing to place yet.
+    private Size? SourceFrame => Capturing ? SelectedCaptureOptions().Normalize().FrameSize : videoFrame;
+
+    // Measuring touches the disk, so it happens as the file is chosen rather than as it is applied.
+    private async void ProbeVideo()
+    {
+        var file = path.Text;
+        probing = file;
+        videoFrame = null;
+        UpdateAspectControls();
+        if (string.IsNullOrWhiteSpace(file)) return;
+        Size? measured = null;
+        try { measured = await VideoProbe.Measure(file); }
+        catch (Exception ex) { status.Text = "Could not read the video: " + ex.Message; }
+        if (IsDisposed || probing != file) return;
+        videoFrame = measured;
+        if (measured is null && File.Exists(file)) status.Text = "That file carries no video track this build can read.";
+        UpdateAspectControls();
     }
     // The custom size only means anything for the Custom entry, so it stays out of the way otherwise.
     private void UpdateAspectControls()
     {
-        customSize.Enabled = customMode.Enabled = aspect.Text == CaptureOptions.Custom;
-        // The anchor can only do something where the picture leaves room on the monitor. A 16:9 capture
+        var layout = SelectedPlacement();
+        customSize.Enabled = customMode.Enabled = layout.Aspect == Placement.Custom;
+        // The anchor can only do something where the picture leaves room on the monitor. A 16:9 source
         // filling a 16:9 screen leaves none, and a grid that looks live but moves nothing reads as a bug.
         string? blocked = null;
-        if (monitors.SelectedIndex >= 0 && monitors.SelectedIndex < screens.Length)
+        if (monitors.SelectedIndex < 0 || monitors.SelectedIndex >= screens.Length) blocked = "Choose an output monitor first.";
+        else if (SourceFrame is not { } frame) blocked = "Choose a video file first: where the picture can move depends on the shape it turns out to be.";
+        else
         {
             var monitor = screens[monitors.SelectedIndex].Bounds.Size;
-            var placed = SelectedCaptureOptions().Normalize().Fit(monitor);
+            var placed = layout.Fit(frame, monitor);
             if (placed.Width >= monitor.Width && placed.Height >= monitor.Height)
-                blocked = aspect.Text == CaptureOptions.Stretch
+                blocked = layout.Aspect == Placement.Stretch
                     ? $"Stretch to screen fills the whole {monitor.Width} x {monitor.Height} monitor, so there is nowhere to move the picture."
-                    : $"The picture already covers the whole {monitor.Width} x {monitor.Height} monitor, so there is nowhere to move it. Crop it with Custom size to free up room.";
+                    : $"The picture already covers the whole {monitor.Width} x {monitor.Height} monitor, so there is nowhere to move it. Give it an output resolution smaller than the monitor to free up room.";
         }
-        else blocked = "Choose an output monitor first.";
         anchorsActive = blocked is null;
         // A disabled control gets no mouse messages, so the reason has to live on the grid behind them.
         anchorTips.SetToolTip(anchorGrid, blocked ?? string.Empty);
@@ -301,6 +336,7 @@ internal sealed class MainForm : Form
         else if (colorSpace.Text == "Rec.2020") colorSpace.SelectedItem = "Rec.709";
     }
     private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor);
+    private Placement SelectedPlacement() => new Placement(aspect.Text, customSize.Text, customMode.Text, SelectedAnchor).Normalize();
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)
     {
@@ -320,11 +356,11 @@ internal sealed class MainForm : Form
     private void UpdateGeometry()
     {
         if (monitors.SelectedIndex < 0 || monitors.SelectedIndex >= screens.Length) { geometry.Text = ""; return; }
+        if (SourceFrame is not { } frame) { geometry.Text = "Choose a video file to see where it will be drawn."; return; }
         var monitor = screens[monitors.SelectedIndex].Bounds.Size;
-        var options = SelectedCaptureOptions().Normalize();
-        var frame = options.FrameSize;
-        var cut = options.Crop;
-        var placed = options.Fit(monitor);
+        var layout = SelectedPlacement();
+        var cut = layout.Crop(frame);
+        var placed = layout.Fit(frame, monitor);
         var taken = cut.Size == frame
             ? $"Uses the whole {frame.Width} × {frame.Height} frame"
             : $"Cuts {cut.Width} × {cut.Height} out of {frame.Width} × {frame.Height} at ({cut.X}, {cut.Y})";
