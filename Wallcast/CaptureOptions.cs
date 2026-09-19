@@ -7,7 +7,7 @@ internal sealed record CaptureOptions(
     string Format = "NV12", string Resolution = "1920x1080", string Fps = "60",
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000",
-    string CustomSize = "1920x1080", string CustomMode = "Crop, fit to screen", string Anchor = "Center")
+    string CustomSize = "1920x1080", string CustomMode = "Fill, cropping the overflow", string Anchor = "Center")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
@@ -16,16 +16,14 @@ internal sealed record CaptureOptions(
     public static readonly string[] ColorRanges = ["Limited", "Full"];
     // Fixed ratios are gone on purpose. Under crop they would only ever be a worse-spelled custom
     // size, and the day a fixed ratio is genuinely wanted it will want to scale, not crop.
-    public const string AsCaptured = "Input resolution", Stretch = "Stretch to screen", Custom = "Custom size";
+    public const string AsCaptured = "Input resolution", Stretch = "Stretch to screen", Custom = "Output resolution";
     public static readonly string[] Aspects = [AsCaptured, Stretch, Custom];
-    // Crop is for a card that pillarboxes the source, leaving real black bars in the frame. Stretch is
-    // for an older one that squeezes the whole source into its frame instead, where there is nothing to
-    // cut off and the picture just has to be given its shape back.
-    // Shape modes read the size as a ratio only, so 2732x2048 and 1024x768 do the same thing. Pixels
-    // reads it literally. Both are wanted, and the names have to say which is which.
-    public const string CropShape = "Crop to this shape", CropPixels = "Crop this many pixels",
-        StretchShape = "Stretch frame to this shape";
-    public static readonly string[] CustomModes = [CropShape, CropPixels, StretchShape];
+    // An output resolution, the way OBS means it: the picture comes out at this size whatever the
+    // capture resolution is. The mode says how the frame is mapped into it, and the frame is always
+    // centred inside it, so there is no second position to choose.
+    public const string FillCrop = "Fill, cropping the overflow", FitPad = "Fit, padding the gap",
+        Centred = "Centre at 1:1, padding the gap", StretchFill = "Stretch to fill, distorting";
+    public static readonly string[] CustomModes = [FillCrop, FitPad, Centred, StretchFill];
     // Where the picture sits on the monitor, laid out like a canvas-size anchor. It only bites where
     // the picture leaves room: a 4:3 picture on a 16:9 screen can slide sideways but not up or down.
     public static readonly string[] Anchors =
@@ -125,14 +123,15 @@ internal sealed record CaptureOptions(
         get
         {
             var frame = FrameSize;
-            // Stretching reshapes the whole frame, so there is nothing to cut away.
-            if (Aspect != Custom || CustomMode == StretchShape) return new Rectangle(Point.Empty, frame);
-            var wanted = Measure(CustomSize) ?? new Size(1920, 1080);
+            // Only filling and 1:1 leave anything on the cutting room floor. Fit and stretch both keep
+            // the whole frame; they differ in whether the gap is padded or the picture is distorted.
+            if (Aspect != Custom || CustomMode is FitPad or StretchFill) return new Rectangle(Point.Empty, frame);
+            var output = Measure(CustomSize) ?? new Size(1920, 1080);
             // Sizing before centring keeps the cut exact; rounding a placed rectangle drags the bar we
             // are removing back into the picture. The bars sit either side, so the cut is centred.
-            var size = CustomMode == CropPixels
-                ? new Size(Math.Min(frame.Width, wanted.Width), Math.Min(frame.Height, wanted.Height))
-                : Largest(frame, (double)wanted.Width / wanted.Height);
+            var size = CustomMode == Centred
+                ? new Size(Math.Min(frame.Width, output.Width), Math.Min(frame.Height, output.Height))
+                : Largest(frame, (double)output.Width / output.Height);
             size = new Size(size.Width & ~1, size.Height & ~1);
             return new Rectangle((frame.Width - size.Width) / 2 & ~1, (frame.Height - size.Height) / 2 & ~1,
                 size.Width, size.Height);
@@ -151,17 +150,31 @@ internal sealed record CaptureOptions(
     public Rectangle Fit(Size target)
     {
         if (Aspect == Stretch) return new Rectangle(Point.Empty, target);
-        var output = OutputSize;
-        var wanted = Measure(CustomSize) ?? new Size(1920, 1080);
-        // Cutting an exact number of pixels draws them one for one; everything else fills what it can.
-        var size = Aspect == Custom && CustomMode == CropPixels
-            ? new Size(Math.Min(target.Width, output.Width), Math.Min(target.Height, output.Height))
-            : Largest(target, Aspect == Custom && CustomMode == StretchShape
-                ? (double)wanted.Width / wanted.Height
-                : (double)output.Width / output.Height);
+        var cut = OutputSize;
+        var size = Aspect == Custom ? Canvas(cut) : Largest(target, (double)cut.Width / cut.Height);
+        // A monitor smaller than the requested output still has to show all of it, shape intact.
+        size = Bound(size, target);
         var cell = Math.Max(0, Array.IndexOf(Anchors, Anchor));
         return new Rectangle(Place(target.Width - size.Width, cell % 3), Place(target.Height - size.Height, cell / 3),
             size.Width, size.Height);
+    }
+
+    // The output resolution is the whole point: filling and stretching land on it exactly, fitting and
+    // 1:1 land inside it. The gap is left uncovered rather than painted, so the wallpaper fills it.
+    private Size Canvas(Size cut)
+    {
+        var output = Measure(CustomSize) ?? new Size(1920, 1080);
+        if (CustomMode is FillCrop or StretchFill) return output;
+        if (CustomMode == Centred) return new Size(Math.Min(output.Width, cut.Width), Math.Min(output.Height, cut.Height));
+        var scale = Math.Min((double)output.Width / cut.Width, (double)output.Height / cut.Height);
+        return new Size(Math.Max(1, (int)Math.Round(cut.Width * scale)), Math.Max(1, (int)Math.Round(cut.Height * scale)));
+    }
+
+    private static Size Bound(Size want, Size target)
+    {
+        if (want.Width <= target.Width && want.Height <= target.Height) return want;
+        var scale = Math.Min((double)target.Width / want.Width, (double)target.Height / want.Height);
+        return new Size(Math.Max(1, (int)Math.Round(want.Width * scale)), Math.Max(1, (int)Math.Round(want.Height * scale)));
     }
 
     private static Size Largest(Size target, double ratio) => new(

@@ -50,7 +50,7 @@ internal static class Program
                 var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault();
                 var res = args.SkipWhile(a => a != "--resolution").Skip(1).FirstOrDefault();
                 var custom = args.SkipWhile(a => a != "--custom").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
-                var mode = args.Contains("--squeeze") ? CaptureOptions.StretchShape : args.Contains("--pixels") ? CaptureOptions.CropPixels : CaptureOptions.CropShape;
+                var mode = args.Contains("--squeeze") ? CaptureOptions.StretchFill : args.Contains("--pixels") ? CaptureOptions.Centred : CaptureOptions.FillCrop;
                 var anchor = args.SkipWhile(a => a != "--anchor").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? "Center";
                 var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
                     Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Custom,
@@ -215,49 +215,50 @@ internal static class Program
             catch (InvalidOperationException) { Console.WriteLine("PASS: Empty device rejected"); }
             var screen = new Size(3840, 2160);
             if (new CaptureOptions().Fit(screen) != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Uncropped geometry distorted");
-            // A 4:3 source pillarboxed into a 3840x2160 frame has exactly 480px of bar each side.
+            // A 4:3 source pillarboxed into a 3840x2160 frame has exactly 480px of bar each side, and an
+            // output resolution of 2732x2048 asks for the picture at exactly that size.
             var pillar = new CaptureOptions(Resolution: "3840x2160", Aspect: CaptureOptions.Custom, CustomSize: "2732x2048");
             if (pillar.Crop != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Pillarbox not cropped off: " + pillar.Crop);
-            if (pillar.Fit(screen) != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Cropped picture not placed 1:1");
+            if (pillar.Fit(screen).Size != new Size(2732, 2048)) throw new Exception("Fill did not land on the output size: " + pillar.Fit(screen));
             if (!pillar.ConversionFilter.StartsWith("crop=2880:2160:480:0,")) throw new Exception("Crop missing from the filter chain");
+            // The whole point of an output resolution: the capture resolution must not change it.
+            foreach (var capture in new[] { "1920x1080", "2560x1440", "3840x2160" })
+            {
+                var any = pillar with { Resolution = capture };
+                if (any.Fit(screen).Size != new Size(2732, 2048)) throw new Exception($"{capture} gave {any.Fit(screen).Size}, not the output size");
+                if (Math.Abs((double)any.Crop.Width / any.Crop.Height - 2732d / 2048) > 0.01) throw new Exception($"{capture} cut the wrong shape");
+            }
             // The anchor moves the picture on the monitor; the cut itself always stays centred, because
-            // that is where the bars are. A 4:3 picture on a 16:9 screen can only slide sideways.
+            // that is where the bars are.
             foreach (var (anchor, expected) in new[]
             {
-                ("Top left", new Rectangle(0, 0, 2880, 2160)), ("Left", new Rectangle(0, 0, 2880, 2160)),
-                ("Right", new Rectangle(960, 0, 2880, 2160)), ("Bottom right", new Rectangle(960, 0, 2880, 2160)),
-                ("Center", new Rectangle(480, 0, 2880, 2160)), ("Top", new Rectangle(480, 0, 2880, 2160)),
+                ("Top left", new Point(0, 0)), ("Left", new Point(0, 56)), ("Right", new Point(1108, 56)),
+                ("Bottom right", new Point(1108, 112)), ("Center", new Point(554, 56)), ("Top", new Point(554, 0)),
             })
             {
                 var placed = pillar with { Anchor = anchor };
-                if (placed.Fit(screen) != expected) throw new Exception($"Anchor {anchor} put the picture at {placed.Fit(screen)}");
+                if (placed.Fit(screen).Location != expected) throw new Exception($"Anchor {anchor} put the picture at {placed.Fit(screen)}");
                 if (placed.Crop != new Rectangle(480, 0, 2880, 2160)) throw new Exception($"Anchor {anchor} moved the crop");
             }
-            // On a taller screen the room is vertical instead, so the anchor slides the other way.
-            var square = new Size(2048, 2048);
-            foreach (var (anchor, expected) in new[]
-            {
-                ("Top", new Rectangle(0, 0, 2048, 1536)), ("Center", new Rectangle(0, 256, 2048, 1536)),
-                ("Bottom right", new Rectangle(0, 512, 2048, 1536)),
-            })
-                if ((pillar with { Anchor = anchor }).Fit(square) != expected)
-                    throw new Exception($"Anchor {anchor} on a square screen gave {(pillar with { Anchor = anchor }).Fit(square)}");
-            // Reading the size as pixels cuts exactly that, and draws it one source pixel per screen pixel.
-            var exact = pillar with { CustomMode = CaptureOptions.CropPixels };
-            if (exact.Crop != new Rectangle(554, 56, 2732, 2048)) throw new Exception("Pixel crop cut " + exact.Crop);
-            if (exact.Fit(screen) != new Rectangle(554, 56, 2732, 2048)) throw new Exception("Pixel crop did not stay 1:1");
-            // A shape mode ignores the numbers, so two sizes of the same shape must agree; a pixel mode
-            // must not, which is the whole point of having both.
-            var sameShape = pillar with { CustomSize = "1024x768" };
-            if (sameShape.Crop != pillar.Crop) throw new Exception("Shape mode should only read the ratio");
-            if ((exact with { CustomSize = "1024x768" }).Crop == exact.Crop) throw new Exception("Pixel mode ignored the numbers");
-            // Stretching an anamorphic frame crops nothing and only gives the picture its shape back.
-            var squeezed = pillar with { CustomMode = CaptureOptions.StretchShape };
+            // An output larger than the monitor still has to fit on it, shape intact.
+            var huge = pillar with { CustomSize = "7680x5760" };
+            if (huge.Fit(screen) != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Oversized output not bounded: " + huge.Fit(screen));
+            // Centre keeps one source pixel per screen pixel and never scales up to the output size.
+            var exact = pillar with { CustomMode = CaptureOptions.Centred };
+            if (exact.Crop != new Rectangle(554, 56, 2732, 2048)) throw new Exception("Centre cut " + exact.Crop);
+            if (exact.Fit(screen).Size != new Size(2732, 2048)) throw new Exception("Centre did not stay 1:1");
+            if ((exact with { Resolution = "1920x1080" }).Fit(screen).Size != new Size(1920, 1080))
+                throw new Exception("Centre should not invent pixels the capture does not have");
+            // Fit keeps the whole frame and shrinks it until it sits inside the output.
+            var padded = pillar with { CustomMode = CaptureOptions.FitPad };
+            if (padded.Crop != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Fit should not crop");
+            if (padded.Fit(screen).Size != new Size(2732, 1537)) throw new Exception("Fit landed on " + padded.Fit(screen).Size);
+            // Stretching an anamorphic frame crops nothing and fills the output exactly, distortion included.
+            var squeezed = pillar with { CustomMode = CaptureOptions.StretchFill };
             if (squeezed.Crop != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Stretch should not crop");
             if (squeezed.ConversionFilter.Contains("crop=")) throw new Exception("Stretch should not add a crop filter");
-            // Screen placement needs no even rounding, so this lands on the exact 2732:2048 ratio.
-            if (squeezed.Fit(screen) != new Rectangle(479, 0, 2881, 2160)) throw new Exception("Stretch did not reshape to the custom aspect: " + squeezed.Fit(screen));
-            Console.WriteLine("PASS: pillarbox crop, screen anchors and anamorphic stretch");
+            if (squeezed.Fit(screen).Size != new Size(2732, 2048)) throw new Exception("Stretch did not fill the output");
+            Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors");
             TestColors();
             using var control = new Control();
             using var playback = new Playback(control);

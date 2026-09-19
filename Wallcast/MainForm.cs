@@ -81,8 +81,8 @@ internal sealed class MainForm : Form
         AddCaptureSetting("Input HDR", dynamicRange);
         AddCaptureSetting("HDR peak (nits)", hdrPeak);
         AddCaptureSetting("Display aspect", aspect);
-        AddCaptureSetting("Custom size (W x H)", customSize);
-        AddCaptureSetting("Custom sizing", customMode);
+        AddCaptureSetting("Output size (W x H)", customSize);
+        AddCaptureSetting("Output mapping", customMode);
         for (var cell = 0; cell < anchorCells.Length; cell++)
         {
             var button = new RadioButton

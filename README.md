@@ -21,8 +21,8 @@ Video keeps its own aspect ratio and loops. It is muted by default and can be un
 | Resolution / FPS | **1920×1080 / 60**, 720p·1440p·4K and others / 59.94·50·30 and others |
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
-| Display aspect | **Input resolution**, Stretch to screen, Custom size |
-| Custom size / sizing | e.g. `2732x2048` · **Crop to this shape**, Crop this many pixels, Stretch frame to this shape |
+| Display aspect | **Input resolution**, Stretch to screen, Output resolution |
+| Output size / mapping | e.g. `2753x2064` · **Fill, cropping the overflow**, Fit / Centre at 1:1 / Stretch to fill |
 | Screen position | 3x3 grid, **Center** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
@@ -30,26 +30,32 @@ Nothing is guessed. The device is opened with exactly the values you chose and Y
 For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. Unlike an earlier version, the whole input is no longer force-squeezed to 4:3. Black bars baked into the source are left alone.
 
 **Display aspect** decides what happens to the captured frame before it reaches the desktop.
-`Input resolution` leaves it alone. `Stretch to screen` fills the monitor and is the only choice that
-distorts. `Custom size` takes a size of your own, such as an iPad's `2732x2048`, and **Custom sizing**
-says how to read it:
+`Input resolution` leaves it alone. `Stretch to screen` fills the monitor and distorts to do it.
+`Output resolution` is the one that behaves like OBS: you give a size such as `2753x2064` and the
+picture comes out at that size **whatever the capture resolution is**. Capture at 1920x1080 or at
+3840x2160 and the result is still 2753x2064; only how much detail went into it changes. **Output
+mapping** says how the frame is laid into that rectangle, always centred inside it:
 
-- `Crop to this shape` reads the size as a **ratio and nothing else**, so `2732x2048` and `1024x768` do
-  exactly the same thing. It cuts the largest region of that shape out of the frame and draws it as
-  large as the monitor allows. This is the one for a card that pillarboxes: on a 3840x2160 capture of a
-  4:3 source it lands on exactly `2880x2160` at x=480, where the bars end.
-- `Crop this many pixels` reads it **literally**. `2668x1500` cuts 2668 by 1500 pixels out of the middle
-  of the frame and draws them one source pixel per screen pixel. Use this when you know the numbers, and
-  when a ratio would not say what you mean - `2668x1500` is 16:9, so as a shape it would change nothing.
-- `Stretch frame to this shape` crops nothing. It takes the whole frame and gives it that shape. This is
+- `Fill, cropping the overflow` scales the frame until it covers the whole output and cuts off whatever
+  hangs over. Nothing is distorted and no gap is left. This is the one that takes a pillarbox off: on a
+  3840x2160 capture of a 4:3 source it cuts `2880x2160` at x=480, exactly where the bars end.
+- `Fit, padding the gap` keeps the entire frame and shrinks it until it sits inside the output, so a
+  shape mismatch shows up as a gap rather than as a missing edge.
+- `Centre at 1:1, padding the gap` does not scale at all. It takes as much of the middle of the frame as
+  the output has room for and draws it one source pixel per screen pixel, so it never grows past what
+  the capture actually has: a 1920x1080 capture stays 1920x1080 even if the output asks for more.
+- `Stretch to fill, distorting` keeps the whole frame and stretches it onto the output exactly. This is
   the one for an older card that squeezes the source into its frame instead of pillarboxing it, where
-  there are no bars to cut and the picture only needs its proportions back.
+  there is nothing to cut and the picture only needs its proportions back.
+
+A gap is not painted black - it is simply not covered, so your own wallpaper shows through it. An output
+bigger than the monitor is scaled down to fit, keeping its shape.
 
 The line under the settings spells out what the current numbers do - what is cut out of the frame, how
 big it is drawn and where - so there is no need to guess which reading is in force.
 
 **Screen position** is the 3x3 grid, read like a canvas-size anchor: it decides where on the monitor the
-picture sits. It can only do something where the picture leaves room, so the grid greys out when there
+picture sits. It places the output rectangle; what goes on inside that rectangle is always centred. It can only do something where the picture leaves room, so the grid greys out when there
 is none - a 16:9 capture shown whole on a 16:9 monitor already covers every pixel, and so does anything
 stretched to the screen. The crop itself always comes out of the middle of the frame, because that is
 where a pillarbox puts the bars.
