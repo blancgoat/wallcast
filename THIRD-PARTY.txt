@@ -1,0 +1,45 @@
+Wallcast - third party components
+=================================
+
+Wallcast itself is GPL-3.0-or-later. The full licence is in LICENSE, and the source is at the
+repository this build came from.
+
+Because the components below are GPL, so is the whole of this binary distribution, and anyone
+receiving it is entitled to the corresponding source of every part. The upstream sources are listed
+here; none of them have been modified for this build.
+
+
+FFmpeg 9.0.1 (capture/ffmpeg.exe)
+---------------------------------
+Licence : GPL-3.0-or-later. Full text in capture/LICENSE-FFmpeg.txt.
+          Built with --enable-gpl --enable-version3, which is what makes this v3 rather than v2.
+Build   : "essentials" build by Gyan Doshi, https://www.gyan.dev/ffmpeg/builds/
+Source  : https://www.ffmpeg.org/download.html  (tag n9.0.1)
+          Build configuration and scripts: https://github.com/GyanD/codexffmpeg
+Notes   : capture/README-FFmpeg.txt is the build's own notice file and lists everything linked into it.
+          The exact version and SHA-256 this project accepts are pinned in scripts/setup-capture.ps1.
+
+
+LibVLC 3.0.23 (libvlc/win-x64/)
+-------------------------------
+Licence : GPL-2.0-or-later. Shipped as the GPL build of the VideoLAN.LibVLC.Windows.GPL package.
+Source  : https://code.videolan.org/videolan/vlc  (tag 3.0.23)
+Notes   : Only the win-x64 runtime is shipped; this application is x64 only.
+
+
+LibVLCSharp 3.10.1
+------------------
+Licence : LGPL-2.1-or-later
+Source  : https://code.videolan.org/videolan/LibVLCSharp
+
+
+Vortice.Windows 3.8.3 (Vortice.*.dll, SharpGen.Runtime.*.dll)
+-------------------------------------------------------------
+Licence : MIT
+Source  : https://github.com/amerkoleci/Vortice.Windows
+
+
+.NET 8 runtime (System.*.dll, Microsoft.*.dll, PresentationFramework.dll and friends)
+-------------------------------------------------------------------------------------
+Licence : MIT
+Source  : https://github.com/dotnet/runtime

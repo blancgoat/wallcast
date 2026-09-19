@@ -22,6 +22,20 @@
     <EmbeddedResource Include="Wallcast.ico" />
     <Content Include="../.tools/capture/*" Link="capture/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- A GPL binary has to travel with its licence and with where to get everyone's source. -->
+    <Content Include="../LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../THIRD-PARTY.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- The VLC package carries x86 and arm64 runtimes as well, 244 MB that an x64-only build can never
+       load. Dropping them takes the publish folder from 642 MB to under 400 MB. -->
+  <Target Name="TrimUnusedVlcRuntimes" AfterTargets="Publish">
+    <ItemGroup>
+      <UnusedVlc Include="$(PublishDir)libvlc/win-x86/**/*;$(PublishDir)libvlc/win-arm64/**/*" />
+    </ItemGroup>
+    <Delete Files="@(UnusedVlc)" />
+    <RemoveDir Directories="$(PublishDir)libvlc/win-x86;$(PublishDir)libvlc/win-arm64" />
+  </Target>
   <Target Name="CheckCaptureEngine" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('../.tools/capture/ffmpeg.exe')" Text="Run scripts/setup-capture.ps1 to install the capture engine before building." />
   </Target>

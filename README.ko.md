@@ -85,6 +85,26 @@ dotnet publish Wallcast -c Release -r win-x64 --self-contained true -o artifacts
 
 프로젝트 로컬 SDK가 있으면 `dotnet` 대신 `.\.tools\dotnet\dotnet.exe` 사용. 배포 시 `artifacts/Wallcast` 폴더 전체가 필요합니다. 단일 exe 배포가 아닙니다. publish는 빈 폴더에 하세요. 기존 폴더에 덮어쓰면 프레임워크 어셈블리가 패키지 버전보다 최신 타임스탬프를 가진 경우 교체되지 않아, 실행 시 `System.Text.Json` 로드 실패가 납니다.
 
+### 릴리스 만들기
+
+```powershell
+./scripts/package.ps1
+```
+
+빈 `artifacts/Wallcast`에 publish한 뒤 `artifacts/Wallcast-win-x64.zip`으로 묶습니다. 약 164MB이고
+이 파일 하나만 올리면 됩니다. 풀면 `Wallcast` 폴더 하나가 나오고 어디서든 실행됩니다. 설치 과정도,
+따로 설치할 것도 없습니다. 캡처 엔진·VLC 런타임·라이선스 파일 중 하나라도 빠지면 스크립트가
+패키징을 거부합니다.
+
+publish 시 VLC 패키지가 같이 담는 x86·arm64 런타임을 지웁니다. x64 전용 빌드는 절대 못 쓰는데
+642MB 중 244MB를 차지합니다. 압축은 Windows 10·11에 기본 포함된 `tar.exe`로 합니다.
+`Compress-Archive`는 항목 이름을 역슬래시로 쓰는데, macOS·Linux의 unzip이 이걸 파일 하나당 긴
+이름 하나로 만들어버립니다.
+
+FFmpeg와 LibVLC가 GPL이므로 이들을 담은 배포물도 전부 GPL입니다. 그래서 `LICENSE`와
+`THIRD-PARTY.txt`를 publish 폴더에 같이 넣습니다. 후자에 구성 요소별 라이선스와 소스 위치가
+적혀 있습니다. 배포하는 아카이브에는 둘 다 반드시 포함하세요.
+
 ## 범위와 구조
 
 - `Sources.cs`: 파일/캡처 입력 모델.
@@ -95,6 +115,7 @@ dotnet publish Wallcast -c Release -r win-x64 --self-contained true -o artifacts
 - `DesktopHost.cs`: Windows Explorer WorkerW에 영상 창 연결.
 - `CaptureDevices.cs`: DirectShow 비디오 장치 검색.
 - `MainForm.cs`: 설정, 모니터 선택, 트레이, 로컬 설정 저장.
+- `scripts/package.ps1`: 깨끗하게 publish하고 릴리스 zip으로 묶습니다. 라이선스나 캡처 엔진이 빠진 빌드는 패키징을 거부합니다.
 - `scripts/make-icon.ps1`: `Wallcast.ico`를 그립니다. 큰 그림을 줄이면 아이콘 실루엣 두 개가 뭉개져서
   크기마다 따로 그립니다. `-PngDirectory`를 주면 PNG로도 내보냅니다.
 

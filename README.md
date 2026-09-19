@@ -87,6 +87,26 @@ dotnet publish Wallcast -c Release -r win-x64 --self-contained true -o artifacts
 
 With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`. Distribution needs the whole `artifacts/Wallcast` folder; this is not a single-exe build. Publish into an empty folder. Overwriting an existing one can leave a framework assembly in place when its timestamp is newer than the package version's, and the app then fails at startup loading `System.Text.Json`.
 
+### Releasing a build
+
+```powershell
+./scripts/package.ps1
+```
+
+That publishes into an empty `artifacts/Wallcast` and archives it as `artifacts/Wallcast-win-x64.zip`,
+about 164 MB, which is the single file to upload. It unpacks to one `Wallcast` folder that runs from
+anywhere - no installer and nothing to install alongside it. The script refuses to package a build that
+is missing the capture engine, the VLC runtime or either licence file.
+
+The publish drops the x86 and arm64 VLC runtimes the package ships, which an x64-only build can never
+load; that alone is 244 MB of the 642 MB it would otherwise be. It archives with `tar.exe`, which comes
+with Windows 10 and 11, because `Compress-Archive` writes entry names with backslashes that unzip on
+macOS and Linux turns into one long filename per file.
+
+Because FFmpeg and LibVLC are GPL, so is anything you hand out that contains them. `LICENSE` and
+`THIRD-PARTY.txt` are published into the folder for that reason - the latter lists every component, its
+licence and where its source lives. Keep both in any archive you distribute.
+
 ## Scope and layout
 
 - `Sources.cs`: the file and capture input models.
@@ -97,6 +117,7 @@ With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`
 - `DesktopHost.cs`: attaches the video window to the Windows Explorer WorkerW.
 - `CaptureDevices.cs`: DirectShow video device discovery.
 - `MainForm.cs`: settings, monitor selection, tray, local settings file.
+- `scripts/package.ps1`: publishes clean and archives the release zip, refusing to ship a build that is missing a licence or the capture engine.
 - `scripts/make-icon.ps1`: draws `Wallcast.ico`. Every size is drawn natively, since the two icon
   silhouettes turn to mush when a large drawing is scaled down. `-PngDirectory` also writes the
   sizes out as PNG.
