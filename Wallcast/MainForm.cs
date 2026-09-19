@@ -95,6 +95,9 @@ internal sealed class MainForm : Form
         AddCaptureSetting("Screen position", anchorGrid);
         aspect.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         customMode.SelectedIndexChanged += (_, _) => UpdateAspectControls();
+        // Room depends on the capture shape and the monitor too, not just on the aspect choice.
+        resolution.SelectedIndexChanged += (_, _) => UpdateAspectControls();
+        customSize.TextChanged += (_, _) => UpdateAspectControls();
         UpdateAspectControls();
         dynamicRange.SelectedIndexChanged += (_, _) => UpdateHdrControls();
         UpdateHdrControls();
@@ -116,6 +119,7 @@ internal sealed class MainForm : Form
         body.Controls.Add(actions);
         body.Controls.Add(status);
         mode.SelectedIndexChanged += (_, _) => UpdateMode();
+        monitors.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         mute.CheckedChanged += (_, _) => playback?.SetMute(mute.Checked);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Wallcast", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
@@ -252,9 +256,16 @@ internal sealed class MainForm : Form
     private void UpdateAspectControls()
     {
         customSize.Enabled = customMode.Enabled = aspect.Text == CaptureOptions.Custom;
-        // Stretching fills the monitor, so there is no room left for the picture to be moved into.
-        var movable = aspect.Text != CaptureOptions.Stretch;
-        foreach (var cell in anchorCells) cell.Enabled = movable;
+        // The anchor can only do something where the picture leaves room on the monitor. A 16:9 capture
+        // filling a 16:9 screen leaves none, and a grid that looks live but moves nothing reads as a bug.
+        var room = false;
+        if (monitors.SelectedIndex >= 0 && monitors.SelectedIndex < screens.Length)
+        {
+            var monitor = screens[monitors.SelectedIndex].Bounds.Size;
+            var placed = SelectedCaptureOptions().Normalize().Fit(monitor);
+            room = placed.Width < monitor.Width || placed.Height < monitor.Height;
+        }
+        foreach (var cell in anchorCells) cell.Enabled = room;
     }
     private void UpdateHdrControls()
     {

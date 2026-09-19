@@ -42,9 +42,14 @@ says how to read it:
   there are no bars to cut and the picture only needs its proportions back.
 
 **Screen position** is the 3x3 grid, read like a canvas-size anchor: it decides where on the monitor the
-picture sits. It only bites where the picture leaves room - a 4:3 picture on a 16:9 monitor can slide
-left and right but not up and down - and it is off while stretching, which fills the monitor. The crop
-itself always comes out of the middle of the frame, because that is where a pillarbox puts the bars.
+picture sits. It can only do something where the picture leaves room, so the grid greys out when there
+is none - a 16:9 capture shown whole on a 16:9 monitor already covers every pixel, and so does anything
+stretched to the screen. The crop itself always comes out of the middle of the frame, because that is
+where a pillarbox puts the bars.
+
+`Input resolution` and `Stretch to screen` look identical whenever the capture is the same shape as the
+monitor, which is the usual case. They part company as soon as it is not: a 640x480 capture on a 16:9
+monitor is drawn 4:3 and undistorted by the first, and stretched to fill by the second.
 
 There are no fixed 16:9 / 4:3 entries. Under cropping they would only be a clumsier custom size, and if
 a fixed ratio is ever wanted it will be wanted as a stretch, not a crop. Cutting an exact pixel count
