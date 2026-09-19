@@ -5,15 +5,15 @@ namespace Still;
 
 internal sealed record CaptureOptions(
     string Format = "NV12", string Resolution = "1920x1080", string Fps = "60",
-    string ColorSpace = "Rec.709", string ColorRange = "제한 (Limited)", string Aspect = "입력 해상도",
+    string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
     public static readonly string[] FrameRates = ["60", "59.94", "50", "30", "29.97", "25", "24"];
     public static readonly string[] ColorSpaces = ["Rec.709", "Rec.601", "Rec.2020"];
-    public static readonly string[] ColorRanges = ["제한 (Limited)", "전체 (Full)"];
-    public static readonly string[] Aspects = ["입력 해상도", "16:9", "4:3", "16:10", "화면에 늘이기"];
+    public static readonly string[] ColorRanges = ["Limited", "Full"];
+    public static readonly string[] Aspects = ["Input resolution", "16:9", "4:3", "16:10", "Stretch to screen"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
 
@@ -26,11 +26,14 @@ internal sealed record CaptureOptions(
         Aspects.Contains(Aspect) ? Aspect : Aspects[0],
         DynamicRanges.Contains(DynamicRange) ? DynamicRange : DynamicRanges[0],
         HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000");
+    // Derived, so it is not part of the saved settings.
+    [System.Text.Json.Serialization.JsonIgnore]
     public Size FrameSize
     {
         get { var parts = Resolution.Split('x'); return new Size(int.Parse(parts[0]), int.Parse(parts[1])); }
     }
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string ConversionFilter
     {
         get
@@ -54,8 +57,8 @@ internal sealed record CaptureOptions(
 
     public ProcessStartInfo CreateStartInfo(string device, int bufferMilliseconds, string output)
     {
-        if (string.IsNullOrWhiteSpace(device)) throw new InvalidOperationException("캡처 장치를 선택해 주세요.");
-        if (this != Normalize()) throw new InvalidOperationException("지원하지 않는 캡처 설정입니다.");
+        if (string.IsNullOrWhiteSpace(device)) throw new InvalidOperationException("Select a capture device.");
+        if (this != Normalize()) throw new InvalidOperationException("Unsupported capture settings.");
         var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "capture", "ffmpeg.exe"))
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true
@@ -83,7 +86,7 @@ internal sealed record CaptureOptions(
 
     public Rectangle Fit(Size target)
     {
-        if (Aspect == "화면에 늘이기") return new Rectangle(Point.Empty, target);
+        if (Aspect == Aspects[4]) return new Rectangle(Point.Empty, target);
         double ratio = Aspect switch { "16:9" => 16d / 9, "4:3" => 4d / 3, "16:10" => 1.6, _ => (double)FrameSize.Width / FrameSize.Height };
         var width = Math.Min(target.Width, (int)Math.Round(target.Height * ratio));
         var height = Math.Min(target.Height, (int)Math.Round(target.Width / ratio));

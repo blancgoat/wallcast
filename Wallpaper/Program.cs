@@ -7,8 +7,8 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
         using var mutex = new Mutex(true, "Still.Wallpaper.SingleInstance", out var first);
-        if (!first) { MessageBox.Show("이미 실행 중입니다. 시스템 트레이에서 Still을 열어 주세요."); return; }
+        if (!first) { MessageBox.Show("Still is already running. Open it from the system tray."); return; }
         try { Application.Run(new MainForm()); }
-        catch (Exception ex) { MessageBox.Show(ex.Message, "Still 시작 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(ex.Message, "Still startup error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 }

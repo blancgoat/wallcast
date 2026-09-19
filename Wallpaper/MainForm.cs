@@ -5,12 +5,12 @@ namespace Still;
 internal sealed class MainForm : Form
 {
     private readonly ComboBox mode = new() { DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly TextBox path = new() { ReadOnly = true, PlaceholderText = "동영상 파일을 선택하세요" };
+    private readonly TextBox path = new() { ReadOnly = true, PlaceholderText = "Choose a video file" };
     private readonly ComboBox devices = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox monitors = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly NumericUpDown cache = new() { Minimum = 50, Maximum = 2000, Increment = 50, Value = 150 };
-    private readonly CheckBox mute = new() { Text = "동영상 음소거", Checked = true, AutoSize = true };
-    private readonly Label status = new() { Text = "입력을 선택하고 적용하세요.", AutoSize = true, MaximumSize = new Size(490, 0) };
+    private readonly CheckBox mute = new() { Text = "Mute video", Checked = true, AutoSize = true };
+    private readonly Label status = new() { Text = "Choose an input and apply it.", AutoSize = true, MaximumSize = new Size(490, 0) };
     private readonly FlowLayoutPanel fileRow = Row();
     private readonly FlowLayoutPanel captureRow = Row();
     private readonly FlowLayoutPanel cacheRow = Row();
@@ -34,63 +34,63 @@ internal sealed class MainForm : Form
     {
         SuspendLayout();
         AutoScaleMode = AutoScaleMode.None;
-        Text = "Still · 움직이는 바탕화면";
+        Text = "Still · Moving wallpaper";
         AutoScaleDimensions = new SizeF(96, 96);
         ClientSize = new Size(580, 790);
         MinimumSize = new Size(580, 610);
-        Font = new Font("맑은 고딕", 10);
+        Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(246, 247, 250);
         var body = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28), AutoScroll = true };
         Controls.Add(body);
         body.Controls.Add(new Label { Text = "Still", Font = new Font("Segoe UI", 28, FontStyle.Bold), AutoSize = true });
-        body.Controls.Add(new Label { Text = "원하는 화면을, 바탕화면으로.", AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
-        body.Controls.Add(Caption("입력 소스"));
-        mode.Items.AddRange(["동영상 파일", "캡처보드 / 가상 카메라"]);
+        body.Controls.Add(new Label { Text = "Any screen, as your wallpaper.", AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
+        body.Controls.Add(Caption("Input source"));
+        mode.Items.AddRange(["Video file", "Capture card / virtual camera"]);
         mode.Width = 490;
         mode.SelectedIndex = 0;
         body.Controls.Add(mode);
         path.Width = 365;
         fileRow.Controls.Add(path);
-        fileRow.Controls.Add(Button("파일 선택", PickFile));
+        fileRow.Controls.Add(Button("Browse", PickFile));
         body.Controls.Add(fileRow);
         devices.Width = 365;
         captureRow.Controls.Add(devices);
-        captureRow.Controls.Add(Button("새로 고침", (_, _) => RefreshDevices()));
+        captureRow.Controls.Add(Button("Refresh", (_, _) => RefreshDevices()));
         body.Controls.Add(captureRow);
-        AddCaptureSetting("영상 형식", format);
-        AddCaptureSetting("해상도", resolution);
-        AddCaptureSetting("프레임 속도", fps);
-        AddCaptureSetting("색 공간", colorSpace);
-        AddCaptureSetting("색 범위", colorRange);
-        AddCaptureSetting("입력 HDR", dynamicRange);
-        AddCaptureSetting("HDR 최대 밝기 (nit)", hdrPeak);
-        AddCaptureSetting("표시 비율", aspect);
+        AddCaptureSetting("Pixel format", format);
+        AddCaptureSetting("Resolution", resolution);
+        AddCaptureSetting("Frame rate", fps);
+        AddCaptureSetting("Color space", colorSpace);
+        AddCaptureSetting("Color range", colorRange);
+        AddCaptureSetting("Input HDR", dynamicRange);
+        AddCaptureSetting("HDR peak (nits)", hdrPeak);
+        AddCaptureSetting("Display aspect", aspect);
         dynamicRange.SelectedIndexChanged += (_, _) => UpdateHdrControls();
         UpdateHdrControls();
         body.Controls.Add(captureSettings);
-        cacheRow.Controls.Add(new Label { Text = "캡처 버퍼 (ms)", AutoSize = true, Padding = new Padding(0, 5, 10, 0) });
+        cacheRow.Controls.Add(new Label { Text = "Capture buffer (ms)", AutoSize = true, Padding = new Padding(0, 5, 10, 0) });
         cacheRow.Controls.Add(cache);
         body.Controls.Add(cacheRow);
-        body.Controls.Add(Caption("출력 모니터"));
+        body.Controls.Add(Caption("Output monitor"));
         monitors.Width = 490;
         body.Controls.Add(monitors);
         mute.Margin = new Padding(0, 14, 0, 10);
         body.Controls.Add(mute);
-        body.Controls.Add(new Label { Text = "원본 비율 유지 · 동영상 자동 반복 · 캡처는 영상만 출력", AutoSize = true, ForeColor = Color.DimGray });
+        body.Controls.Add(new Label { Text = "Keeps the source aspect · video loops · capture is video only", AutoSize = true, ForeColor = Color.DimGray });
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
-        actions.Controls.Add(Button("바탕화면 적용", Apply));
-        actions.Controls.Add(Button("중지", (_, _) => Stop()));
-        actions.Controls.Add(Button("트레이로 숨기기", (_, _) => Hide()));
+        actions.Controls.Add(Button("Apply to desktop", Apply));
+        actions.Controls.Add(Button("Stop", (_, _) => Stop()));
+        actions.Controls.Add(Button("Hide to tray", (_, _) => Hide()));
         body.Controls.Add(actions);
         body.Controls.Add(status);
         mode.SelectedIndexChanged += (_, _) => UpdateMode();
         mute.CheckedChanged += (_, _) => playback?.SetMute(mute.Checked);
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Still 열기", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
-        menu.Items.Add("배경 중지", null, (_, _) => Stop());
-        menu.Items.Add("종료", null, (_, _) => { exiting = true; Close(); });
-        tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "Still · 바탕화면", Visible = true, ContextMenuStrip = menu };
+        menu.Items.Add("Open Still", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
+        menu.Items.Add("Stop wallpaper", null, (_, _) => Stop());
+        menu.Items.Add("Exit", null, (_, _) => { exiting = true; Close(); });
+        tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "Still · Wallpaper", Visible = true, ContextMenuStrip = menu };
         tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
         Shown += (_, _) =>
         {
@@ -110,7 +110,7 @@ internal sealed class MainForm : Form
             if (playback?.IsDesktopAlive == false || !current.Select(s => (s.DeviceName, s.Bounds)).SequenceEqual(screens.Select(s => (s.DeviceName, s.Bounds))))
             {
                 Stop(); RefreshMonitors();
-                status.Text = "바탕화면 또는 모니터 구성이 바뀌었습니다. 다시 적용해 주세요.";
+                status.Text = "The desktop or monitor layout changed. Apply again.";
             }
         };
         UpdateMode();
@@ -137,7 +137,7 @@ internal sealed class MainForm : Form
     {
         RefreshMonitors(); RefreshDevices(); LoadSettings(); UpdateMode();
         try { playback = new Playback(this); playback.Status += text => status.Text = text; watchdog.Start(); }
-        catch (Exception ex) { status.Text = "재생 엔진 초기화 실패: " + ex.Message; }
+        catch (Exception ex) { status.Text = "Playback engine failed to start: " + ex.Message; }
     }
 
     private void RefreshMonitors()
@@ -145,7 +145,7 @@ internal sealed class MainForm : Form
         var old = monitors.SelectedIndex;
         screens = Screen.AllScreens;
         monitors.Items.Clear();
-        foreach (var screen in screens) monitors.Items.Add($"{screen.DeviceName} · {screen.Bounds.Width} × {screen.Bounds.Height}{(screen.Primary ? " · 기본" : "")}");
+        foreach (var screen in screens) monitors.Items.Add($"{screen.DeviceName} · {screen.Bounds.Width} × {screen.Bounds.Height}{(screen.Primary ? " · primary" : "")}");
         if (screens.Length > 0) monitors.SelectedIndex = Math.Clamp(old, 0, screens.Length - 1);
     }
 
@@ -158,14 +158,14 @@ internal sealed class MainForm : Form
             devices.Items.AddRange(CaptureDevices.Enumerate().Cast<object>().ToArray());
             if (old is not null && devices.Items.Contains(old)) devices.SelectedItem = old;
             else if (devices.Items.Count > 0) devices.SelectedIndex = 0;
-            else status.Text = "캡처 장치가 없습니다. 장치를 연결한 뒤 새로 고침하세요.";
+            else status.Text = "No capture devices. Connect one and refresh.";
         }
-        catch (Exception ex) { status.Text = "장치 검색 실패: " + ex.Message; }
+        catch (Exception ex) { status.Text = "Device search failed: " + ex.Message; }
     }
 
     private void PickFile(object? sender, EventArgs e)
     {
-        using var dialog = new OpenFileDialog { Title = "배경 동영상 선택", Filter = "동영상|*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv;*.ts|모든 파일|*.*", CheckFileExists = true };
+        using var dialog = new OpenFileDialog { Title = "Choose a wallpaper video", Filter = "Video|*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv;*.ts|All files|*.*", CheckFileExists = true };
         if (dialog.ShowDialog(this) == DialogResult.OK) path.Text = dialog.FileName;
     }
 
@@ -173,27 +173,27 @@ internal sealed class MainForm : Form
     {
         try
         {
-            if (playback is null) throw new InvalidOperationException("재생 엔진을 사용할 수 없습니다. 앱을 다시 실행해 주세요.");
-            if (monitors.SelectedIndex < 0) throw new InvalidOperationException("모니터를 선택해 주세요.");
+            if (playback is null) throw new InvalidOperationException("The playback engine is unavailable. Restart the app.");
+            if (monitors.SelectedIndex < 0) throw new InvalidOperationException("Select a monitor.");
             IWallpaperSource input;
             if (mode.SelectedIndex == 0)
             {
-                if (!File.Exists(path.Text)) throw new InvalidOperationException("동영상 파일을 선택해 주세요.");
+                if (!File.Exists(path.Text)) throw new InvalidOperationException("Select a video file.");
                 input = new VideoSource(path.Text);
             }
             else
             {
-                if (devices.SelectedItem is not string name) throw new InvalidOperationException("캡처 장치를 선택해 주세요.");
+                if (devices.SelectedItem is not string name) throw new InvalidOperationException("Select a capture device.");
                 input = new CaptureSource(name, (int)cache.Value, SelectedCaptureOptions());
             }
-            status.Text = "입력을 여는 중…";
+            status.Text = "Opening the input…";
             playback.Start(input, screens[monitors.SelectedIndex], mute.Checked);
             SaveSettings();
         }
         catch (Exception ex) { status.Text = ex.Message; }
     }
 
-    private void Stop() { playback?.Stop(); status.Text = "중지됨 · 기존 바탕화면으로 돌아왔습니다."; }
+    private void Stop() { playback?.Stop(); status.Text = "Stopped · your original wallpaper is back."; }
     private void UpdateMode()
     {
         var parent = captureRow.Parent;
@@ -240,7 +240,7 @@ internal sealed class MainForm : Form
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(mode.SelectedIndex, path.Text, devices.SelectedItem as string, screens[monitors.SelectedIndex].DeviceName, (int)cache.Value, mute.Checked, SelectedCaptureOptions())));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { status.Text = "재생 중 · 설정 저장 실패: " + ex.Message; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { status.Text = "Playing · could not save settings: " + ex.Message; }
     }
     private void LoadSettings()
     {
@@ -260,7 +260,7 @@ internal sealed class MainForm : Form
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { status.Text = "저장된 설정을 읽지 못해 기본값으로 시작했습니다."; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { status.Text = "Could not read saved settings, started with defaults."; }
     }
     private sealed record Settings(int Mode, string Path, string? Device, string Monitor, int Cache, bool Mute, CaptureOptions? Capture = null);
 }

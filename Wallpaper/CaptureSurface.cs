@@ -118,7 +118,7 @@ internal sealed class CaptureSurface : Control
         {
             Stop();
             Release();
-            Failed?.Invoke("바탕화면 렌더러를 초기화하지 못했습니다: " + ex.Message);
+            Failed?.Invoke("Could not start the desktop renderer: " + ex.Message);
             return false;
         }
     }
@@ -150,7 +150,7 @@ internal sealed class CaptureSurface : Control
         catch (Exception ex)
         {
             Stop();
-            Failed?.Invoke("바탕화면 렌더링이 중단되었습니다: " + ex.Message);
+            Failed?.Invoke("Desktop rendering stopped: " + ex.Message);
         }
         finally { CapturePlayback.ReturnFrame(bytes); }
     }

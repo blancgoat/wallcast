@@ -216,7 +216,7 @@ internal static class Program
         var black = ConvertNv12(16, 128, 128, options);
         var white = ConvertNv12(235, 128, 128, options);
         if (black[0] > 2 || white[0] < 253) throw new Exception("Limited range regression");
-        var full = ConvertNv12(16, 128, 128, options with { ColorRange = "전체 (Full)" });
+        var full = ConvertNv12(16, 128, 128, options with { ColorRange = "Full" });
         if (Math.Abs(full[0] - 16) > 2) throw new Exception("Full range selection ignored");
         var rec601 = ConvertNv12(63, 102, 240, options with { ColorSpace = "Rec.601" });
         if (Math.Abs(red[2] - rec601[2]) < 10) throw new Exception("Color matrix selection ignored");

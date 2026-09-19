@@ -23,7 +23,7 @@ internal sealed class DesktopHost : Form
     public void Attach(Screen screen)
     {
         var progman = FindWindow("Progman", null);
-        if (progman == IntPtr.Zero) throw new InvalidOperationException("Windows 바탕화면을 찾을 수 없습니다.");
+        if (progman == IntPtr.Zero) throw new InvalidOperationException("Could not find the Windows desktop.");
         SendMessageTimeout(progman, 0x052C, new IntPtr(0xD), new IntPtr(1), 2, 1000, out _);
         desktop = IntPtr.Zero;
         EnumWindows((window, _) =>
@@ -34,7 +34,7 @@ internal sealed class DesktopHost : Form
         }, IntPtr.Zero);
         // Some Explorer versions keep the icon view and wallpaper worker under Progman.
         if (desktop == IntPtr.Zero) desktop = FindWindowEx(progman, IntPtr.Zero, "WorkerW", null);
-        if (desktop == IntPtr.Zero) throw new InvalidOperationException("바탕화면 영상 영역을 만들 수 없습니다. Explorer를 다시 시작한 뒤 시도해 주세요.");
+        if (desktop == IntPtr.Zero) throw new InvalidOperationException("Could not create the desktop video layer. Restart Explorer and try again.");
 
         var handle = Handle;
         var style = GetWindowLongPtr(handle, -16).ToInt64();

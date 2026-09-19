@@ -43,7 +43,7 @@ internal sealed class Playback : IDisposable
             {
                 var options = (device.Options ?? new CaptureOptions()).Normalize();
                 capture = new CapturePlayback(device.Device, device.CacheMilliseconds, options);
-                capture.Started += () => Post(current, () => Status?.Invoke($"재생 중 · {options.Format} / {options.ColorSpace} / {options.DynamicRange} / {options.Resolution} / {options.Fps}fps"));
+                capture.Started += () => Post(current, () => Status?.Invoke($"Playing · {options.Format} / {options.ColorSpace} / {options.DynamicRange} / {options.Resolution} / {options.Fps}fps"));
                 capture.Failed += detail => Post(current, () => { Stop(); Status?.Invoke(detail); });
                 var surface = new CaptureSurface(capture);
                 surface.Failed += detail => Post(current, () => { Stop(); Status?.Invoke(detail); });
@@ -54,17 +54,17 @@ internal sealed class Playback : IDisposable
             player = new MediaPlayer(engine) { Hwnd = host.Handle, Mute = mute };
             player.EnableKeyInput = false;
             player.EnableMouseInput = false;
-            player.Playing += (_, _) => Post(current, () => Status?.Invoke("바탕화면에서 재생 중"));
+            player.Playing += (_, _) => Post(current, () => Status?.Invoke("Playing on the desktop"));
             player.EncounteredError += (_, _) => Post(current, () =>
             {
                 var detail = string.Join(Environment.NewLine, errors);
                 Stop();
-                Status?.Invoke("재생 실패: " + (string.IsNullOrWhiteSpace(detail) ? "입력을 열 수 없습니다. 장치 연결과 입력 신호를 확인하세요." : detail));
+                Status?.Invoke("Playback failed: " + (string.IsNullOrWhiteSpace(detail) ? "Could not open the input. Check the device connection and its signal." : detail));
             });
             player.EndReached += (_, _) => Post(current, () =>
             {
                 if (source?.Loop == true) { player!.Stop(); Play(); }
-                else { Stop(); Status?.Invoke("입력 신호가 종료되었습니다. 장치를 확인하고 다시 적용하세요."); }
+                else { Stop(); Status?.Invoke("The input signal ended. Check the device and apply again."); }
             });
             Play();
         }
@@ -74,7 +74,7 @@ internal sealed class Playback : IDisposable
     private void Play()
     {
         using var media = ((VideoSource)source!).Open(engine);
-        if (!player!.Play(media)) throw new InvalidOperationException("재생을 시작할 수 없습니다.");
+        if (!player!.Play(media)) throw new InvalidOperationException("Could not start playback.");
     }
 
     private void Post(int current, Action action)

@@ -33,7 +33,7 @@ internal sealed class CapturePlayback : IDisposable
         Options = options;
         var name = "still-" + Guid.NewGuid().ToString("N");
         var info = options.CreateStartInfo(device, buffer, @"\\.\pipe\" + name);
-        if (!File.Exists(info.FileName)) throw new FileNotFoundException("캡처 엔진이 없습니다. Still 폴더 전체를 다시 복사해 주세요.", info.FileName);
+        if (!File.Exists(info.FileName)) throw new FileNotFoundException("The capture engine is missing. Copy the whole Still folder again.", info.FileName);
         pipe = new NamedPipeServerStream(name, PipeDirection.In, 1, PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous, PipeBuffer, PipeBuffer);
         process = new Process { StartInfo = info, EnableRaisingEvents = true };
@@ -90,7 +90,7 @@ internal sealed class CapturePlayback : IDisposable
             if (!token.IsCancellationRequested)
             {
                 try { if (!process.HasExited) process.Kill(true); process.WaitForExit(2000); } catch (InvalidOperationException) { }
-                Failed?.Invoke("캡처 입력을 받지 못했습니다. 장치가 선택한 형식·해상도·FPS를 지원하는지 확인하세요.\n" + string.Join("\n", errors.TakeLast(5)));
+                Failed?.Invoke("No capture input. Check that the device supports the selected format, resolution and frame rate.\n" + string.Join("\n", errors.TakeLast(5)));
             }
         }
     }

@@ -13,7 +13,7 @@ internal sealed record VideoSource(string Path) : IWallpaperSource
     public bool Loop => true;
     public Media Open(LibVLC engine)
     {
-        if (!File.Exists(Path)) throw new FileNotFoundException("동영상 파일을 찾을 수 없습니다.", Path);
+        if (!File.Exists(Path)) throw new FileNotFoundException("Video file not found.", Path);
         return new Media(engine, new Uri(System.IO.Path.GetFullPath(Path)));
     }
 }
