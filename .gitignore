@@ -1,0 +1,8 @@
+.tools/
+**/bin/
+**/obj/
+artifacts/
+.vs/
+
+.DS_Store
+.history/
