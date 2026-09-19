@@ -2,12 +2,12 @@
 
 [한국어](README.ko.md)
 
-A small video wallpaper app for Windows. Pick one video file or one capture device and it shows behind the desktop icons on one monitor.
+A small live wallpaper app for Windows. Point it at a capture card or virtual camera - or a video file - and that picture runs behind the desktop icons on one monitor.
 
 ## Use
 
 1. Run `artifacts/Wallcast/Wallcast.exe`.
-2. Choose a file under **Video file**, or a device under **Capture card / virtual camera**.
+2. Pick a device under **Capture card / virtual camera**, which is the default, or a file under **Video file**.
 3. Pick the output monitor and press **Apply to desktop**.
 4. **Stop** brings your original wallpaper back. The window's X hides to the tray; **Exit** in the tray menu quits for real.
 

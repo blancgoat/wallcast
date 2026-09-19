@@ -4,7 +4,10 @@ namespace Wallcast;
 
 internal sealed class MainForm : Form
 {
+    // Capture leads: it is what the app is for, and it is the default on a fresh install.
+    private static readonly string[] Modes = ["Capture card / virtual camera", "Video file"];
     private readonly ComboBox mode = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private bool Capturing => mode.SelectedIndex == 0;
     private readonly TextBox path = new() { ReadOnly = true, PlaceholderText = "Choose a video file" };
     private readonly ComboBox devices = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox monitors = new() { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -45,7 +48,7 @@ internal sealed class MainForm : Form
         body.Controls.Add(new Label { Text = "Wallcast", Font = new Font("Segoe UI", 28, FontStyle.Bold), AutoSize = true });
         body.Controls.Add(new Label { Text = "Any screen, as your wallpaper.", AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
         body.Controls.Add(Caption("Input source"));
-        mode.Items.AddRange(["Video file", "Capture card / virtual camera"]);
+        mode.Items.AddRange(Modes);
         mode.Width = 490;
         mode.SelectedIndex = 0;
         body.Controls.Add(mode);
@@ -177,15 +180,15 @@ internal sealed class MainForm : Form
             if (playback is null) throw new InvalidOperationException("The playback engine is unavailable. Restart the app.");
             if (monitors.SelectedIndex < 0) throw new InvalidOperationException("Select a monitor.");
             IWallpaperSource input;
-            if (mode.SelectedIndex == 0)
-            {
-                if (!File.Exists(path.Text)) throw new InvalidOperationException("Select a video file.");
-                input = new VideoSource(path.Text);
-            }
-            else
+            if (Capturing)
             {
                 if (devices.SelectedItem is not string name) throw new InvalidOperationException("Select a capture device.");
                 input = new CaptureSource(name, (int)cache.Value, SelectedCaptureOptions());
+            }
+            else
+            {
+                if (!File.Exists(path.Text)) throw new InvalidOperationException("Select a video file.");
+                input = new VideoSource(path.Text);
             }
             status.Text = "Opening the input…";
             playback.Start(input, screens[monitors.SelectedIndex], mute.Checked);
@@ -199,9 +202,9 @@ internal sealed class MainForm : Form
     {
         var parent = captureRow.Parent;
         parent?.SuspendLayout();
-        fileRow.Visible = mode.SelectedIndex == 0;
-        captureRow.Visible = cacheRow.Visible = captureSettings.Visible = mode.SelectedIndex == 1;
-        mute.Enabled = mode.SelectedIndex == 0;
+        fileRow.Visible = !Capturing;
+        captureRow.Visible = cacheRow.Visible = captureSettings.Visible = Capturing;
+        mute.Enabled = !Capturing;
         if (parent is not null) parent.Controls.SetChildIndex(captureRow, parent.Controls.GetChildIndex(mode) + 1);
         parent?.ResumeLayout(true);
     }
@@ -245,7 +248,7 @@ internal sealed class MainForm : Form
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(mode.SelectedIndex, path.Text, devices.SelectedItem as string, screens[monitors.SelectedIndex].DeviceName, (int)cache.Value, mute.Checked, SelectedCaptureOptions())));
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(mode.Text, path.Text, devices.SelectedItem as string, screens[monitors.SelectedIndex].DeviceName, (int)cache.Value, mute.Checked, SelectedCaptureOptions())));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { status.Text = "Playing · could not save settings: " + ex.Message; }
     }
@@ -256,7 +259,9 @@ internal sealed class MainForm : Form
             if (!File.Exists(SettingsPath)) return;
             var saved = JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath));
             if (saved is null) return;
-            mode.SelectedIndex = Math.Clamp(saved.Mode, 0, 1); path.Text = saved.Path;
+            var chosen = Array.IndexOf(Modes, saved.Mode);
+            mode.SelectedIndex = chosen >= 0 ? chosen : 0;
+            path.Text = saved.Path;
             if (saved.Device is not null && devices.Items.Contains(saved.Device)) devices.SelectedItem = saved.Device;
             var index = Array.FindIndex(screens, s => s.DeviceName == saved.Monitor);
             if (index >= 0) monitors.SelectedIndex = index;
@@ -269,5 +274,5 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { status.Text = "Could not read saved settings, started with defaults."; }
     }
-    private sealed record Settings(int Mode, string Path, string? Device, string Monitor, int Cache, bool Mute, CaptureOptions? Capture = null);
+    private sealed record Settings(string Mode, string Path, string? Device, string Monitor, int Cache, bool Mute, CaptureOptions? Capture = null);
 }

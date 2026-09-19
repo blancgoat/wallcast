@@ -17,8 +17,7 @@ internal static class Program
                 Application.EnableVisualStyles();
                 using var form = new MainForm();
                 form.Show();
-                var field = typeof(MainForm).GetField("mode", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-                ((ComboBox)field.GetValue(form)!).SelectedIndex = 1;
+                // Capture is the default input, so the capture settings are already the ones on show.
                 Application.DoEvents();
                 using var preview = new Bitmap(form.Width, form.Height);
                 form.DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size));
