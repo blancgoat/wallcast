@@ -50,7 +50,7 @@ internal sealed class MainForm : Form
     {
         SuspendLayout();
         AutoScaleMode = AutoScaleMode.None;
-        Text = "Wallcast · Live wallpaper";
+        Text = $"Wallcast {Release} · Live wallpaper";
         AutoScaleDimensions = new SizeF(96, 96);
         ClientSize = new Size(580, 905);
         MinimumSize = new Size(580, 660);
@@ -140,7 +140,7 @@ internal sealed class MainForm : Form
         menu.Items.Add("Stop wallpaper", null, (_, _) => Stop());
         menu.Items.Add("Exit", null, (_, _) => { exiting = true; Close(); });
         Icon = LoadIcon(32);
-        tray = new NotifyIcon { Icon = LoadIcon(16), Text = "Wallcast · Live wallpaper", Visible = true, ContextMenuStrip = menu };
+        tray = new NotifyIcon { Icon = LoadIcon(16), Text = $"Wallcast {Release} · Live wallpaper", Visible = true, ContextMenuStrip = menu };
         tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
         Shown += (_, _) =>
         {
@@ -307,6 +307,12 @@ internal sealed class MainForm : Form
         using var stream = typeof(MainForm).Assembly.GetManifestResourceStream("Wallcast.Wallcast.ico");
         return stream is null ? SystemIcons.Application : new Icon(stream, new Size(size, size));
     }
+    // Worth a glance in the title bar: the first thing a bug report needs is which build it came from.
+    private static string Release =>
+        typeof(MainForm).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion.Split('+')[0]
+        ?? typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "";
+
     private string SelectedAnchor => anchorCells.FirstOrDefault(cell => cell.Checked)?.Tag as string ?? "Center";
 
     // Spells out what the current numbers actually do, because "2732x2048" and "1024x768" mean the

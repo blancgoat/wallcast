@@ -93,8 +93,10 @@ With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`
 ./scripts/package.ps1
 ```
 
-That publishes into an empty `artifacts/Wallcast` and archives it as `artifacts/Wallcast-win-x64.zip`,
-about 164 MB, which is the single file to upload. It unpacks to one `Wallcast` folder that runs from
+That publishes into an empty `artifacts/Wallcast` and archives it as
+`artifacts/Wallcast-v1.0.0-win-x64.zip`, about 164 MB, which is the single file to upload. The version
+in the name is read out of the binary that was just built, so the two can never disagree; name, then
+version, then platform, the order Node and PowerShell use for their own downloads. It unpacks to one `Wallcast` folder that runs from
 anywhere - no installer and nothing to install alongside it. The script refuses to package a build that
 is missing the capture engine, the VLC runtime or either licence file.
 
@@ -102,6 +104,11 @@ The publish drops the x86 and arm64 VLC runtimes the package ships, which an x64
 load; that alone is 244 MB of the 642 MB it would otherwise be. It archives with `tar.exe`, which comes
 with Windows 10 and 11, because `Compress-Archive` writes entry names with backslashes that unzip on
 macOS and Linux turns into one long filename per file.
+
+The version lives in one place, `<Version>` in `Wallcast/Wallcast.csproj`. It reaches the title bar, the
+tray tooltip and the file properties of the exe, and the build appends the commit it came from, so a
+screenshot of the title bar is enough to know exactly which build someone is running. Tag a release to
+match: `git tag -a v1.0.0 -m "Wallcast v1.0.0"`.
 
 Because FFmpeg and LibVLC are GPL, so is anything you hand out that contains them. `LICENSE` and
 `THIRD-PARTY.txt` are published into the folder for that reason - the latter lists every component, its

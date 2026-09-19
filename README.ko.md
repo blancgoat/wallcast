@@ -91,8 +91,9 @@ dotnet publish Wallcast -c Release -r win-x64 --self-contained true -o artifacts
 ./scripts/package.ps1
 ```
 
-빈 `artifacts/Wallcast`에 publish한 뒤 `artifacts/Wallcast-win-x64.zip`으로 묶습니다. 약 164MB이고
-이 파일 하나만 올리면 됩니다. 풀면 `Wallcast` 폴더 하나가 나오고 어디서든 실행됩니다. 설치 과정도,
+빈 `artifacts/Wallcast`에 publish한 뒤 `artifacts/Wallcast-v1.0.0-win-x64.zip`으로 묶습니다.
+약 164MB이고 이 파일 하나만 올리면 됩니다. 이름에 들어가는 버전은 방금 빌드한 바이너리에서 읽어오므로
+둘이 어긋날 수 없습니다. 이름 → 버전 → 플랫폼 순인데, Node와 PowerShell이 배포 파일에 쓰는 순서입니다. 풀면 `Wallcast` 폴더 하나가 나오고 어디서든 실행됩니다. 설치 과정도,
 따로 설치할 것도 없습니다. 캡처 엔진·VLC 런타임·라이선스 파일 중 하나라도 빠지면 스크립트가
 패키징을 거부합니다.
 
@@ -100,6 +101,10 @@ publish 시 VLC 패키지가 같이 담는 x86·arm64 런타임을 지웁니다.
 642MB 중 244MB를 차지합니다. 압축은 Windows 10·11에 기본 포함된 `tar.exe`로 합니다.
 `Compress-Archive`는 항목 이름을 역슬래시로 쓰는데, macOS·Linux의 unzip이 이걸 파일 하나당 긴
 이름 하나로 만들어버립니다.
+
+버전은 `Wallcast/Wallcast.csproj`의 `<Version>` 한 곳에만 둡니다. 여기서 제목 표시줄, 트레이 툴팁,
+exe 파일 속성까지 갑니다. 빌드가 커밋 해시도 붙이므로 제목 표시줄 스크린샷만 있으면 어떤 빌드인지
+정확히 알 수 있습니다. 릴리스에는 태그를 맞춰 다세요: `git tag -a v1.0.0 -m "Wallcast v1.0.0"`.
 
 FFmpeg와 LibVLC가 GPL이므로 이들을 담은 배포물도 전부 GPL입니다. 그래서 `LICENSE`와
 `THIRD-PARTY.txt`를 publish 폴더에 같이 넣습니다. 후자에 구성 요소별 라이선스와 소스 위치가

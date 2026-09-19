@@ -21,7 +21,6 @@ $ErrorActionPreference = 'Stop'
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $stage = Join-Path $root "artifacts\Wallcast"
-$zip = Join-Path $root "artifacts\Wallcast-$Runtime.zip"
 if (-not (Test-Path $Dotnet)) { $Dotnet = 'dotnet' }
 
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
@@ -38,6 +37,14 @@ foreach ($unwanted in 'libvlc\win-x86', 'libvlc\win-arm64') {
     if (Test-Path (Join-Path $stage $unwanted)) { throw "$unwanted should have been trimmed" }
 }
 
+# The version comes from what was actually built, so the file name can never disagree with the binary
+# inside it. Name, then version, then platform - the order Node and PowerShell use for their downloads.
+$built = Get-Item (Join-Path $stage 'Wallcast.exe')
+$version = $built.VersionInfo.ProductVersion
+if (-not $version) { throw "the build carries no version" }
+$version = ($version -split '\+')[0]
+$zip = Join-Path $root "artifacts\Wallcast-v$version-$Runtime.zip"
+
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Push-Location (Split-Path $stage -Parent)
 try {
@@ -51,3 +58,4 @@ $zipMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Output "staged $stage ($folderMb MB)"
 Write-Output "wrote  $zip ($zipMb MB)"
 Write-Output "upload that one file; it unpacks to a single Wallcast folder."
+Write-Output "tag it with: git tag -a v$version -m ""Wallcast v$version"""
