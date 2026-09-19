@@ -35,6 +35,8 @@ internal sealed class MainForm : Form
     private readonly ToolTip anchorTips = new() { ShowAlways = true, AutoPopDelay = 15000, InitialDelay = 350 };
     private bool anchorsActive = true;
     private Label? anchorCaption;
+    // A size box that sometimes reads as a ratio and sometimes as pixels needs to show its work.
+    private readonly Label geometry = new() { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0), Margin = new Padding(0, 8, 0, 0) };
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
     private readonly NotifyIcon tray;
@@ -113,6 +115,7 @@ internal sealed class MainForm : Form
         dynamicRange.SelectedIndexChanged += (_, _) => UpdateHdrControls();
         UpdateHdrControls();
         body.Controls.Add(captureSettings);
+        body.Controls.Add(geometry);
         cacheRow.Controls.Add(new Label { Text = "Capture buffer (ms)", AutoSize = true, Padding = new Padding(0, 5, 10, 0) });
         cacheRow.Controls.Add(cache);
         body.Controls.Add(cacheRow);
@@ -246,7 +249,7 @@ internal sealed class MainForm : Form
         var parent = captureRow.Parent;
         parent?.SuspendLayout();
         fileRow.Visible = !Capturing;
-        captureRow.Visible = cacheRow.Visible = captureSettings.Visible = Capturing;
+        captureRow.Visible = cacheRow.Visible = captureSettings.Visible = geometry.Visible = Capturing;
         mute.Enabled = !Capturing;
         if (parent is not null) parent.Controls.SetChildIndex(captureRow, parent.Controls.GetChildIndex(mode) + 1);
         parent?.ResumeLayout(true);
@@ -285,6 +288,7 @@ internal sealed class MainForm : Form
         anchorsActive = blocked is null;
         // A disabled control gets no mouse messages, so the reason has to live on the grid behind them.
         anchorTips.SetToolTip(anchorGrid, blocked ?? string.Empty);
+        UpdateGeometry();
         if (anchorCaption is not null) anchorTips.SetToolTip(anchorCaption, blocked ?? "Where the picture sits on the monitor.");
         PaintAnchors();
     }
@@ -304,6 +308,24 @@ internal sealed class MainForm : Form
         return stream is null ? SystemIcons.Application : new Icon(stream, new Size(size, size));
     }
     private string SelectedAnchor => anchorCells.FirstOrDefault(cell => cell.Checked)?.Tag as string ?? "Center";
+
+    // Spells out what the current numbers actually do, because "2732x2048" and "1024x768" mean the
+    // same thing in a shape mode and quite different things in a pixel one.
+    private void UpdateGeometry()
+    {
+        if (monitors.SelectedIndex < 0 || monitors.SelectedIndex >= screens.Length) { geometry.Text = ""; return; }
+        var monitor = screens[monitors.SelectedIndex].Bounds.Size;
+        var options = SelectedCaptureOptions().Normalize();
+        var frame = options.FrameSize;
+        var cut = options.Crop;
+        var placed = options.Fit(monitor);
+        var taken = cut.Size == frame
+            ? $"Uses the whole {frame.Width} × {frame.Height} frame"
+            : $"Cuts {cut.Width} × {cut.Height} out of {frame.Width} × {frame.Height} at ({cut.X}, {cut.Y})";
+        var covers = placed.Width >= monitor.Width && placed.Height >= monitor.Height;
+        geometry.Text = $"{taken} · drawn {placed.Width} × {placed.Height} at ({placed.X}, {placed.Y}) · " +
+            (covers ? "covers the monitor" : "your wallpaper shows around it");
+    }
 
     // Greyed has to read as greyed at a glance, including on the cell that happens to be chosen.
     private void PaintAnchors()

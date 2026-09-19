@@ -22,7 +22,7 @@ Video keeps its own aspect ratio and loops. It is muted by default and can be un
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Display aspect | **Input resolution**, Stretch to screen, Custom size |
-| Custom size / sizing | e.g. `2732x2048` · **Crop, fit to screen**, Stretch frame to this shape |
+| Custom size / sizing | e.g. `2732x2048` · **Crop to this shape**, Crop this many pixels, Stretch frame to this shape |
 | Screen position | 3x3 grid, **Center** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
@@ -34,12 +34,19 @@ For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited /
 distorts. `Custom size` takes a size of your own, such as an iPad's `2732x2048`, and **Custom sizing**
 says how to read it:
 
-- `Crop, fit to screen` uses its **shape**. It cuts the largest region of that shape out of the frame
-  and draws it as large as the monitor allows. This is the one for a card that pillarboxes: on a
-  3840x2160 capture of a 4:3 source it lands on exactly `2880x2160` at x=480, where the bars end.
+- `Crop to this shape` reads the size as a **ratio and nothing else**, so `2732x2048` and `1024x768` do
+  exactly the same thing. It cuts the largest region of that shape out of the frame and draws it as
+  large as the monitor allows. This is the one for a card that pillarboxes: on a 3840x2160 capture of a
+  4:3 source it lands on exactly `2880x2160` at x=480, where the bars end.
+- `Crop this many pixels` reads it **literally**. `2668x1500` cuts 2668 by 1500 pixels out of the middle
+  of the frame and draws them one source pixel per screen pixel. Use this when you know the numbers, and
+  when a ratio would not say what you mean - `2668x1500` is 16:9, so as a shape it would change nothing.
 - `Stretch frame to this shape` crops nothing. It takes the whole frame and gives it that shape. This is
   the one for an older card that squeezes the source into its frame instead of pillarboxing it, where
   there are no bars to cut and the picture only needs its proportions back.
+
+The line under the settings spells out what the current numbers do - what is cut out of the frame, how
+big it is drawn and where - so there is no need to guess which reading is in force.
 
 **Screen position** is the 3x3 grid, read like a canvas-size anchor: it decides where on the monitor the
 picture sits. It can only do something where the picture leaves room, so the grid greys out when there
@@ -52,8 +59,7 @@ monitor, which is the usual case. They part company as soon as it is not: a 640x
 monitor is drawn 4:3 and undistorted by the first, and stretched to fill by the second.
 
 There are no fixed 16:9 / 4:3 entries. Under cropping they would only be a clumsier custom size, and if
-a fixed ratio is ever wanted it will be wanted as a stretch, not a crop. Cutting an exact pixel count
-rather than a shape is not offered yet either.
+a fixed ratio is ever wanted it will be wanted as a stretch, not a crop.
 
 Cropping happens in the capture engine, so the bars never travel down the pipe in the first place.
 

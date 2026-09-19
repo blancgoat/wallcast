@@ -30,11 +30,11 @@ internal static class Program
                 var caption = (Control?)typeof(MainForm).GetField("anchorCaption", hidden)!.GetValue(form);
                 var cells = (RadioButton[])typeof(MainForm).GetField("anchorCells", hidden)!.GetValue(form)!;
                 var live = cells[0].Enabled;
-                var reason = tips.GetToolTip(grid);
+                var reason = tips.GetToolTip(grid) ?? "";
                 if (!tips.ShowAlways) throw new Exception("Tooltips would stay hidden unless the window is active");
                 if (live && reason.Length > 0) throw new Exception("A usable grid should not explain itself away");
                 if (!live && reason.Length < 20) throw new Exception("A greyed grid must say why: " + reason);
-                if (caption is null || tips.GetToolTip(caption).Length < 20) throw new Exception("The caption carries no explanation");
+                if (caption is null || (tips.GetToolTip(caption) ?? "").Length < 20) throw new Exception("The caption carries no explanation");
                 Console.WriteLine($"PASS: Capture settings form rendered (anchor grid {(live ? "live" : "greyed: " + reason)})");
                 return 0;
             }
@@ -50,7 +50,7 @@ internal static class Program
                 var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault();
                 var res = args.SkipWhile(a => a != "--resolution").Skip(1).FirstOrDefault();
                 var custom = args.SkipWhile(a => a != "--custom").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
-                var mode = args.Contains("--squeeze") ? CaptureOptions.StretchShape : CaptureOptions.CropFit;
+                var mode = args.Contains("--squeeze") ? CaptureOptions.StretchShape : args.Contains("--pixels") ? CaptureOptions.CropPixels : CaptureOptions.CropShape;
                 var anchor = args.SkipWhile(a => a != "--anchor").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? "Center";
                 var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
                     Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Custom,
@@ -242,6 +242,15 @@ internal static class Program
             })
                 if ((pillar with { Anchor = anchor }).Fit(square) != expected)
                     throw new Exception($"Anchor {anchor} on a square screen gave {(pillar with { Anchor = anchor }).Fit(square)}");
+            // Reading the size as pixels cuts exactly that, and draws it one source pixel per screen pixel.
+            var exact = pillar with { CustomMode = CaptureOptions.CropPixels };
+            if (exact.Crop != new Rectangle(554, 56, 2732, 2048)) throw new Exception("Pixel crop cut " + exact.Crop);
+            if (exact.Fit(screen) != new Rectangle(554, 56, 2732, 2048)) throw new Exception("Pixel crop did not stay 1:1");
+            // A shape mode ignores the numbers, so two sizes of the same shape must agree; a pixel mode
+            // must not, which is the whole point of having both.
+            var sameShape = pillar with { CustomSize = "1024x768" };
+            if (sameShape.Crop != pillar.Crop) throw new Exception("Shape mode should only read the ratio");
+            if ((exact with { CustomSize = "1024x768" }).Crop == exact.Crop) throw new Exception("Pixel mode ignored the numbers");
             // Stretching an anamorphic frame crops nothing and only gives the picture its shape back.
             var squeezed = pillar with { CustomMode = CaptureOptions.StretchShape };
             if (squeezed.Crop != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Stretch should not crop");
