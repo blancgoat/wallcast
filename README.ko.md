@@ -103,7 +103,7 @@ dotnet publish Wallcast -c Release -r win-x64 --self-contained true -o artifacts
 ./scripts/package.ps1
 ```
 
-빈 `artifacts/Wallcast`에 publish한 뒤 `artifacts/Wallcast-v1.0.0-win-x64.zip`으로 묶습니다.
+빈 `artifacts/Wallcast`에 publish한 뒤 `artifacts/Wallcast-v1.1.0-win-x64.zip`으로 묶습니다.
 약 164MB이고 이 파일 하나만 올리면 됩니다. 이름에 들어가는 버전은 방금 빌드한 바이너리에서 읽어오므로
 둘이 어긋날 수 없습니다. 이름 → 버전 → 플랫폼 순인데, Node와 PowerShell이 배포 파일에 쓰는 순서입니다.
 풀면 `Wallcast` 폴더 하나가 나오고 어디서든 실행됩니다. 설치 과정도, 따로 설치할 것도 없습니다. 캡처 엔진·VLC 런타임·라이선스 파일 중 하나라도 빠지면 스크립트가
@@ -116,7 +116,7 @@ publish 시 VLC 패키지가 같이 담는 x86·arm64 런타임을 지웁니다.
 
 버전은 `Wallcast/Wallcast.csproj`의 `<Version>` 한 곳에만 둡니다. 여기서 제목 표시줄, 트레이 툴팁,
 exe 파일 속성까지 갑니다. 빌드가 커밋 해시도 붙이므로 제목 표시줄 스크린샷만 있으면 어떤 빌드인지
-정확히 알 수 있습니다. 릴리스에는 태그를 맞춰 다세요: `git tag -a v1.0.0 -m "Wallcast v1.0.0"`.
+정확히 알 수 있습니다. 릴리스에는 태그를 맞춰 다세요: `git tag -a v1.1.0 -m "Wallcast v1.1.0"`.
 
 FFmpeg와 LibVLC가 GPL이므로 이들을 담은 배포물도 전부 GPL입니다. 그래서 `LICENSE`와
 `THIRD-PARTY.txt`를 publish 폴더에 같이 넣습니다. 후자에 구성 요소별 라이선스와 소스 위치가
@@ -169,7 +169,7 @@ WorkerW 방식은 공개된 Windows 바탕화면 API가 아니므로 Windows/Exp
 
 실제 장치 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. 10초간 NV12/Rec.709/Limited/1080p60으로 열어 프레임 수신을 검사합니다. `--snapshot`을 추가하면 로컬 `artifacts/capture-nv12-rec709.png`에 한 프레임을 저장합니다. 기본 앱은 화면을 녹화하거나 저장하지 않습니다.
 
-2026-09-20 동영상 동등화. 동영상 경로가 캡처를 따라잡았습니다. 같은 출력 해상도·매핑·화면 위치를
+2026-09-20 1.1.0 동영상 동등화. 동영상 경로가 캡처를 따라잡았습니다. 같은 출력 해상도·매핑·화면 위치를
 쓰고, 파일이 실제로 어떤 모양인지를 기준으로 같은 계산으로 배치합니다. 그 모양은 플레이어로 파일을
 한 번 더 여는 대신 FFmpeg로 읽습니다. 반복할 때 바탕화면이 드러나던 것도 없어졌습니다. 입력을
 반복시키면 이음매를 지나는 동안 영상 출력이 살아 있지만, 플레이어를 멈췄다 다시 시작하면 그것이

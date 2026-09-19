@@ -111,7 +111,7 @@ With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`
 ```
 
 That publishes into an empty `artifacts/Wallcast` and archives it as
-`artifacts/Wallcast-v1.0.0-win-x64.zip`, about 164 MB, which is the single file to upload. The version
+`artifacts/Wallcast-v1.1.0-win-x64.zip`, about 164 MB, which is the single file to upload. The version
 in the name is read out of the binary that was just built, so the two can never disagree; name, then
 version, then platform, the order Node and PowerShell use for their own downloads. It unpacks to one
 `Wallcast` folder that runs from anywhere - no installer and nothing to install alongside it. The script refuses to package a build that
@@ -125,7 +125,7 @@ macOS and Linux turns into one long filename per file.
 The version lives in one place, `<Version>` in `Wallcast/Wallcast.csproj`. It reaches the title bar, the
 tray tooltip and the file properties of the exe, and the build appends the commit it came from, so a
 screenshot of the title bar is enough to know exactly which build someone is running. Tag a release to
-match: `git tag -a v1.0.0 -m "Wallcast v1.0.0"`.
+match: `git tag -a v1.1.0 -m "Wallcast v1.1.0"`.
 
 Because FFmpeg and LibVLC are GPL, so is anything you hand out that contains them. `LICENSE` and
 `THIRD-PARTY.txt` are published into the folder for that reason - the latter lists every component, its
@@ -181,7 +181,7 @@ Throughput check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-
 
 Real device check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. It opens NV12/Rec.709/Limited/1080p60 for ten seconds and checks that frames arrive. Adding `--snapshot` saves one frame to `artifacts/capture-nv12-rec709.png`. The app itself never records or saves the screen.
 
-2026-09-20, video parity. The video path caught up with capture. It takes the same output resolution,
+2026-09-20, 1.1.0, video parity. The video path caught up with capture. It takes the same output resolution,
 mapping and screen position, placed by the same arithmetic against the shape the file turns out to be,
 read off the file with FFmpeg rather than by opening it a second time in the player. Its loop stopped
 showing the desktop: repeating the input keeps the video output alive across the seam, where stopping
