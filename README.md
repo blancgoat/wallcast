@@ -1,5 +1,9 @@
 # Wallcast
 
+<img width="3840" height="2160" alt="스크린샷 2026-09-20 015700" src="https://github.com/user-attachments/assets/d46da8b0-7133-4d29-8f7f-0bf254de44b0" />
+
+<img width="1182" height="1936" alt="image" src="https://github.com/user-attachments/assets/16722787-99f9-4908-a52a-5589c6e0162b" />
+
 [한국어](README.ko.md)
 
 A small live wallpaper app for Windows. Point it at a capture card or virtual camera - or a video file - and that picture runs behind the desktop icons on one monitor.
