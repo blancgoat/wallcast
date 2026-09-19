@@ -25,13 +25,14 @@ Video keeps its own aspect ratio and loops. It is muted by default and can be un
 | Resolution / FPS | **1920×1080 / 60**, 720p·1440p·4K and others / 59.94·50·30 and others |
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
+| Input HDR / peak | **SDR**, HDR10 / PQ → SDR, HLG → SDR · **1000** nits |
 | Display aspect | **Input resolution**, Stretch to screen, Output resolution |
 | Output size / mapping | e.g. `2753x2064` · **Fill, cropping the overflow**, Fit / Centre at 1:1 / Stretch to fill |
 | Screen position | 3x3 grid, **Center** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
-For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. Unlike an earlier version, the whole input is no longer force-squeezed to 4:3. Black bars baked into the source are left alone.
+For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. If the card pillarboxes a 4:3 source into its 16:9 frame, set **Display aspect** to `Output resolution` with `Fill, cropping the overflow` and those bars come off.
 
 **Display aspect** decides what happens to the captured frame before it reaches the desktop.
 `Input resolution` leaves it alone. `Stretch to screen` fills the monitor and distorts to do it.
@@ -59,8 +60,8 @@ The line under the settings spells out what the current numbers do - what is cut
 big it is drawn and where - so there is no need to guess which reading is in force.
 
 **Screen position** is the 3x3 grid, read like a canvas-size anchor: it decides where on the monitor the
-picture sits. It places the output rectangle; what goes on inside that rectangle is always centred. It can only do something where the picture leaves room, so the grid greys out when there
-is none - a 16:9 capture shown whole on a 16:9 monitor already covers every pixel, and so does anything
+picture sits. It places the output rectangle; what goes inside that rectangle is always centred. It can
+only do something where the picture leaves room, so the grid greys out when there is none - a 16:9 capture shown whole on a 16:9 monitor already covers every pixel, and so does anything
 stretched to the screen. The crop itself always comes out of the middle of the frame, because that is
 where a pillarbox puts the bars.
 
@@ -68,8 +69,8 @@ where a pillarbox puts the bars.
 monitor, which is the usual case. They part company as soon as it is not: a 640x480 capture on a 16:9
 monitor is drawn 4:3 and undistorted by the first, and stretched to fill by the second.
 
-There are no fixed 16:9 / 4:3 entries. Under cropping they would only be a clumsier custom size, and if
-a fixed ratio is ever wanted it will be wanted as a stretch, not a crop.
+There are no fixed 16:9 / 4:3 entries. Under cropping they would only be a clumsier output resolution, and
+if a fixed ratio is ever wanted it will be wanted as a stretch, not a crop.
 
 Cropping happens in the capture engine, so the bars never travel down the pipe in the first place.
 
@@ -100,8 +101,8 @@ With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`
 That publishes into an empty `artifacts/Wallcast` and archives it as
 `artifacts/Wallcast-v1.0.0-win-x64.zip`, about 164 MB, which is the single file to upload. The version
 in the name is read out of the binary that was just built, so the two can never disagree; name, then
-version, then platform, the order Node and PowerShell use for their own downloads. It unpacks to one `Wallcast` folder that runs from
-anywhere - no installer and nothing to install alongside it. The script refuses to package a build that
+version, then platform, the order Node and PowerShell use for their own downloads. It unpacks to one
+`Wallcast` folder that runs from anywhere - no installer and nothing to install alongside it. The script refuses to package a build that
 is missing the capture engine, the VLC runtime or either licence file.
 
 The publish drops the x86 and arm64 VLC runtimes the package ships, which an x64-only build can never
@@ -141,7 +142,7 @@ The WorkerW approach is not a public Windows wallpaper API, so behaviour varies 
 
 ## Verification
 
-The automatic checks run with `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true`. They cover VLC loading, device discovery, invalid input, display aspect geometry, real FFmpeg NV12 red/blue conversion, Limited/Full, the Rec.709/601 difference, and repeatable playback cleanup.
+The automatic checks run with `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true`. They cover VLC loading, device discovery, invalid input, output resolution and every mapping mode, screen anchors, real FFmpeg NV12 red/blue conversion, Limited/Full, the Rec.709/601 difference, and repeatable playback cleanup.
 
 By hand:
 
@@ -154,13 +155,23 @@ By hand:
 
 Video uses LibVLCSharp with VideoLAN.LibVLC.Windows.GPL, capture input uses the FFmpeg 9.0.1 Gyan essentials build, and capture output uses Vortice.Direct3D11. `scripts/setup-capture.ps1` pins the version and SHA-256. Keep `capture/LICENSE-FFmpeg.txt` and `capture/README-FFmpeg.txt` in place.
 
-Desktop output check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --desktop "Live Gamer BOLT"`. It opens the device, attaches it to the desktop, briefly minimises open windows, grabs the real screen and compares it against the frames it received. `--resolution` and `--aspect` set the resolution and display aspect, `--custom 2732x2048` (with `--actual` for exact pixels) sets a custom one, and it reports frames received and frames on screen separately. Whenever the picture does not fill the monitor it also checks the surround still matches the bare desktop, and says how many of those samples were not black to begin with, since a black wallpaper cannot tell a working surround from a black bar. The grab is saved to `artifacts/desktop-capture.png`. It minimises and restores windows, so it is not part of the automatic run. It exists because receiving frames does not prove anything reached the screen.
+Desktop output check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --desktop "Live Gamer BOLT"`. It opens the device, attaches it to the desktop, briefly minimises open windows, grabs the real screen and compares it against the frames it received. `--resolution` and `--aspect` set the capture resolution and the display aspect, `--custom 2753x2064` sets an output resolution (`--pixels` for `Centre at 1:1`, `--squeeze` for `Stretch to fill`), `--anchor Left` moves it on the monitor, and it reports frames received and frames on screen separately. Whenever the picture does not fill the monitor it also checks the surround still matches the bare desktop, and says how many of those samples were not black to begin with, since a black wallpaper cannot tell a working surround from a black bar. The grab is saved to `artifacts/desktop-capture.png`. It minimises and restores windows, so it is not part of the automatic run. It exists because receiving frames does not prove anything reached the screen.
 
 That check excludes the area of any window that refused to minimise, and reports SKIP rather than a failure when less than 20% of the wallpaper was uncovered. With a moving source the moment of the screen grab and the moment a frame arrives do not line up, so it compares against the best of several frames taken either side of the grab. Without both of those a perfectly good renderer looks broken.
 
 Throughput check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --bench "Live Gamer BOLT"`. It reports frames per second and MB/s actually received at 1080p, 1440p and 4K. Anything slower than the device emits means that difference in frames piling up in the queue as latency. Start here for latency problems.
 
 Real device check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. It opens NV12/Rec.709/Limited/1080p60 for ten seconds and checks that frames arrive. Adding `--snapshot` saves one frame to `artifacts/capture-nv12-rec709.png`. The app itself never records or saves the screen.
+
+2026-09-20, 1.0.0. The surround is no longer painted: the window is only as big as the picture, so
+whatever it does not cover stays the wallpaper Windows was already showing. Display aspect became a crop
+rather than a squeeze, then an OBS-style output resolution with four mapping modes, so the picture comes
+out at the size asked for whatever the capture resolution is. Fixed 16:9 and 4:3 entries went away. A
+3x3 screen position places the output on the monitor and greys itself out when there is no room, saying
+why. A line under the settings spells out the resulting geometry. Measured on a Live Gamer BOLT: the
+pillarbox is exactly 480px each side of a 3840x2160 frame, and `Fill` cuts `2880x2160` at x=480 to
+match. 60fps received and 60fps on screen at both 1080p and 4K. All automatic checks pass and a
+published build was run through **Apply to desktop**.
 
 2026-09-19, 4K latency fix: the cause was the throughput ceiling of the redirected stdout pipe. Moving to a named pipe took 4K reception from 24.3fps to 59.9fps (1895 MB/s). The renderer also moved from timer polling to presenting when a frame arrives. The DirectShow queue size was corrected to use the input format, so a 150ms setting at 4K is 112 MB (9 frames) rather than 298 MB (24 frames). In steady state both 1080p and 4K receive at 60fps and reach the screen at 60fps. Verified on a published build all the way through applying 4K.
 
