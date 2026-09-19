@@ -22,8 +22,8 @@ Video keeps its own aspect ratio and loops. It is muted by default and can be un
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Display aspect | **Input resolution**, Stretch to screen, Custom size |
-| Custom size / sizing | e.g. `2732x2048` · **Crop, fit to screen**, Crop actual pixels, Stretch frame to this shape |
-| Crop anchor | 3x3 grid, **Center** |
+| Custom size / sizing | e.g. `2732x2048` · **Crop, fit to screen**, Stretch frame to this shape |
+| Screen position | 3x3 grid, **Center** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
@@ -37,18 +37,18 @@ says how to read it:
 - `Crop, fit to screen` uses its **shape**. It cuts the largest region of that shape out of the frame
   and draws it as large as the monitor allows. This is the one for a card that pillarboxes: on a
   3840x2160 capture of a 4:3 source it lands on exactly `2880x2160` at x=480, where the bars end.
-- `Crop, actual pixels` uses it as a **literal pixel count**. It cuts exactly that many pixels and draws
-  them one source pixel per screen pixel, with no rescaling anywhere.
 - `Stretch frame to this shape` crops nothing. It takes the whole frame and gives it that shape. This is
   the one for an older card that squeezes the source into its frame instead of pillarboxing it, where
   there are no bars to cut and the picture only needs its proportions back.
 
-**Crop anchor** is the 3x3 grid, read like a canvas-size anchor: it picks which part of the frame the
-crop keeps. It applies to both crop modes and is ignored while stretching, since nothing is cut. The
-picture itself always sits in the middle of the monitor.
+**Screen position** is the 3x3 grid, read like a canvas-size anchor: it decides where on the monitor the
+picture sits. It only bites where the picture leaves room - a 4:3 picture on a 16:9 monitor can slide
+left and right but not up and down - and it is off while stretching, which fills the monitor. The crop
+itself always comes out of the middle of the frame, because that is where a pillarbox puts the bars.
 
 There are no fixed 16:9 / 4:3 entries. Under cropping they would only be a clumsier custom size, and if
-a fixed ratio is ever wanted it will be wanted as a stretch, not a crop.
+a fixed ratio is ever wanted it will be wanted as a stretch, not a crop. Cutting an exact pixel count
+rather than a shape is not offered yet either.
 
 Cropping happens in the capture engine, so the bars never travel down the pipe in the first place.
 

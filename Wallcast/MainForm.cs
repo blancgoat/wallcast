@@ -26,7 +26,7 @@ internal sealed class MainForm : Form
     private readonly ComboBox aspect = Choice(CaptureOptions.Aspects);
     private readonly TextBox customSize = new() { Width = 325, Margin = new Padding(3, 4, 3, 4), PlaceholderText = "2732x2048" };
     private readonly ComboBox customMode = Choice(CaptureOptions.CustomModes);
-    // A canvas-size anchor: nine cells, the arrows pointing the way the crop is pulled.
+    // A canvas-size anchor: nine cells, the arrows pointing where on the monitor the picture goes.
     private static readonly string[] AnchorGlyphs = ["↖", "↑", "↗", "←", "●", "→", "↙", "↓", "↘"];
     private readonly RadioButton[] anchorCells = new RadioButton[CaptureOptions.Anchors.Length];
     private readonly TableLayoutPanel anchorGrid = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 3, Margin = new Padding(3, 4, 3, 4) };
@@ -81,15 +81,18 @@ internal sealed class MainForm : Form
         {
             var button = new RadioButton
             {
+                // AutoCheck would hand the selection to whichever cell the form happens to focus first.
+                AutoCheck = false,
                 Appearance = Appearance.Button, Text = AnchorGlyphs[cell], Tag = CaptureOptions.Anchors[cell],
                 Width = 30, Height = 28, Margin = new Padding(1), TextAlign = ContentAlignment.MiddleCenter,
                 Checked = CaptureOptions.Anchors[cell] == "Center"
             };
+            button.Click += (sender, _) => { foreach (var other in anchorCells) other.Checked = ReferenceEquals(other, sender); };
             anchorTips.SetToolTip(button, CaptureOptions.Anchors[cell]);
             anchorCells[cell] = button;
             anchorGrid.Controls.Add(button, cell % 3, cell / 3);
         }
-        AddCaptureSetting("Crop anchor", anchorGrid);
+        AddCaptureSetting("Screen position", anchorGrid);
         aspect.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         customMode.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         UpdateAspectControls();
@@ -248,11 +251,10 @@ internal sealed class MainForm : Form
     // The custom size only means anything for the Custom entry, so it stays out of the way otherwise.
     private void UpdateAspectControls()
     {
-        var custom = aspect.Text == CaptureOptions.Custom;
-        customSize.Enabled = customMode.Enabled = custom;
-        // Nothing is cut away when the frame is only being reshaped, so the anchor has nothing to say.
-        var cropping = custom && customMode.Text != CaptureOptions.StretchShape;
-        foreach (var cell in anchorCells) cell.Enabled = cropping;
+        customSize.Enabled = customMode.Enabled = aspect.Text == CaptureOptions.Custom;
+        // Stretching fills the monitor, so there is no room left for the picture to be moved into.
+        var movable = aspect.Text != CaptureOptions.Stretch;
+        foreach (var cell in anchorCells) cell.Enabled = movable;
     }
     private void UpdateHdrControls()
     {

@@ -37,7 +37,7 @@ internal static class Program
                 var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault();
                 var res = args.SkipWhile(a => a != "--resolution").Skip(1).FirstOrDefault();
                 var custom = args.SkipWhile(a => a != "--custom").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
-                var mode = args.Contains("--actual") ? CaptureOptions.CropActual : args.Contains("--squeeze") ? CaptureOptions.StretchShape : CaptureOptions.CropFit;
+                var mode = args.Contains("--squeeze") ? CaptureOptions.StretchShape : CaptureOptions.CropFit;
                 var anchor = args.SkipWhile(a => a != "--anchor").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? "Center";
                 var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
                     Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Custom,
@@ -207,24 +207,35 @@ internal static class Program
             if (pillar.Crop != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Pillarbox not cropped off: " + pillar.Crop);
             if (pillar.Fit(screen) != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Cropped picture not placed 1:1");
             if (!pillar.ConversionFilter.StartsWith("crop=2880:2160:480:0,")) throw new Exception("Crop missing from the filter chain");
+            // The anchor moves the picture on the monitor; the cut itself always stays centred, because
+            // that is where the bars are. A 4:3 picture on a 16:9 screen can only slide sideways.
             foreach (var (anchor, expected) in new[]
             {
-                ("Top left", new Rectangle(0, 0, 2880, 2160)), ("Right", new Rectangle(960, 0, 2880, 2160)),
-                ("Bottom right", new Rectangle(960, 0, 2880, 2160)), ("Center", new Rectangle(480, 0, 2880, 2160)),
+                ("Top left", new Rectangle(0, 0, 2880, 2160)), ("Left", new Rectangle(0, 0, 2880, 2160)),
+                ("Right", new Rectangle(960, 0, 2880, 2160)), ("Bottom right", new Rectangle(960, 0, 2880, 2160)),
+                ("Center", new Rectangle(480, 0, 2880, 2160)), ("Top", new Rectangle(480, 0, 2880, 2160)),
             })
-                if ((pillar with { Anchor = anchor }).Crop != expected) throw new Exception($"Anchor {anchor} placed the crop wrong");
-            // Actual pixels cuts exactly what was asked for and draws it without rescaling.
-            var exact = pillar with { CustomMode = CaptureOptions.CropActual };
-            if (exact.Crop != new Rectangle(554, 56, 2732, 2048) || exact.Fit(screen) != new Rectangle(554, 56, 2732, 2048))
-                throw new Exception("Actual pixels did not stay 1:1");
-            if ((exact with { Anchor = "Top left" }).Crop != new Rectangle(0, 0, 2732, 2048)) throw new Exception("Anchor ignored at actual pixels");
+            {
+                var placed = pillar with { Anchor = anchor };
+                if (placed.Fit(screen) != expected) throw new Exception($"Anchor {anchor} put the picture at {placed.Fit(screen)}");
+                if (placed.Crop != new Rectangle(480, 0, 2880, 2160)) throw new Exception($"Anchor {anchor} moved the crop");
+            }
+            // On a taller screen the room is vertical instead, so the anchor slides the other way.
+            var square = new Size(2048, 2048);
+            foreach (var (anchor, expected) in new[]
+            {
+                ("Top", new Rectangle(0, 0, 2048, 1536)), ("Center", new Rectangle(0, 256, 2048, 1536)),
+                ("Bottom right", new Rectangle(0, 512, 2048, 1536)),
+            })
+                if ((pillar with { Anchor = anchor }).Fit(square) != expected)
+                    throw new Exception($"Anchor {anchor} on a square screen gave {(pillar with { Anchor = anchor }).Fit(square)}");
             // Stretching an anamorphic frame crops nothing and only gives the picture its shape back.
             var squeezed = pillar with { CustomMode = CaptureOptions.StretchShape };
             if (squeezed.Crop != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Stretch should not crop");
             if (squeezed.ConversionFilter.Contains("crop=")) throw new Exception("Stretch should not add a crop filter");
             // Screen placement needs no even rounding, so this lands on the exact 2732:2048 ratio.
             if (squeezed.Fit(screen) != new Rectangle(479, 0, 2881, 2160)) throw new Exception("Stretch did not reshape to the custom aspect: " + squeezed.Fit(screen));
-            Console.WriteLine("PASS: crop anchors, actual pixels and anamorphic stretch");
+            Console.WriteLine("PASS: pillarbox crop, screen anchors and anamorphic stretch");
             TestColors();
             using var control = new Control();
             using var playback = new Playback(control);

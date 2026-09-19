@@ -21,10 +21,10 @@ internal sealed record CaptureOptions(
     // Crop is for a card that pillarboxes the source, leaving real black bars in the frame. Stretch is
     // for an older one that squeezes the whole source into its frame instead, where there is nothing to
     // cut off and the picture just has to be given its shape back.
-    public const string CropFit = "Crop, fit to screen", CropActual = "Crop, actual pixels",
-        StretchShape = "Stretch frame to this shape";
-    public static readonly string[] CustomModes = [CropFit, CropActual, StretchShape];
-    // Which part of the frame the crop keeps, laid out like a canvas-size anchor.
+    public const string CropFit = "Crop, fit to screen", StretchShape = "Stretch frame to this shape";
+    public static readonly string[] CustomModes = [CropFit, StretchShape];
+    // Where the picture sits on the monitor, laid out like a canvas-size anchor. It only bites where
+    // the picture leaves room: a 4:3 picture on a 16:9 screen can slide sideways but not up or down.
     public static readonly string[] Anchors =
         ["Top left", "Top", "Top right", "Left", "Center", "Right", "Bottom left", "Bottom", "Bottom right"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
@@ -125,21 +125,17 @@ internal sealed record CaptureOptions(
             // Stretching reshapes the whole frame, so there is nothing to cut away.
             if (Aspect != Custom || CustomMode == StretchShape) return new Rectangle(Point.Empty, frame);
             var wanted = Measure(CustomSize) ?? new Size(1920, 1080);
-            var size = CustomMode == CropActual
-                ? new Size(Math.Min(frame.Width, wanted.Width), Math.Min(frame.Height, wanted.Height))
-                : Largest(frame, (double)wanted.Width / wanted.Height);
-            // Sizing before placing keeps the anchor exact; rounding a placed rectangle drags the bar
-            // we are removing back into the picture.
+            // Sizing before centring keeps the cut exact; rounding a placed rectangle drags the bar we
+            // are removing back into the picture. The bars sit either side, so the cut is centred.
+            var size = Largest(frame, (double)wanted.Width / wanted.Height);
             size = new Size(size.Width & ~1, size.Height & ~1);
-            var cell = Math.Max(0, Array.IndexOf(Anchors, Anchor));
-            return new Rectangle(Place(frame.Width - size.Width, cell % 3), Place(frame.Height - size.Height, cell / 3),
+            return new Rectangle((frame.Width - size.Width) / 2 & ~1, (frame.Height - size.Height) / 2 & ~1,
                 size.Width, size.Height);
         }
     }
 
     // 0 hugs the near edge, 2 the far edge, 1 sits in the middle of whatever room is left over.
-    private static int Place(int slack, int position) =>
-        Math.Clamp((position switch { 0 => 0, 2 => slack, _ => slack / 2 }) & ~1, 0, slack);
+    private static int Place(int slack, int position) => position switch { 0 => 0, 2 => slack, _ => slack / 2 };
 
     // What actually leaves the capture engine, which is the frame minus whatever was cropped away.
     [System.Text.Json.Serialization.JsonIgnore]
@@ -152,16 +148,13 @@ internal sealed record CaptureOptions(
         if (Aspect == Stretch) return new Rectangle(Point.Empty, target);
         var output = OutputSize;
         var wanted = Measure(CustomSize) ?? new Size(1920, 1080);
-        // Actual pixels means exactly that: the cropped picture lands one source pixel per screen pixel.
-        var size = Aspect == Custom
-            ? CustomMode switch
-            {
-                CropActual => new Size(Math.Min(target.Width, output.Width), Math.Min(target.Height, output.Height)),
-                StretchShape => Largest(target, (double)wanted.Width / wanted.Height),
-                _ => Largest(target, (double)output.Width / output.Height)
-            }
-            : Largest(target, (double)output.Width / output.Height);
-        return new Rectangle((target.Width - size.Width) / 2, (target.Height - size.Height) / 2, size.Width, size.Height);
+        // Stretching gives the frame the custom shape; otherwise the picture keeps the shape it has.
+        var size = Largest(target, Aspect == Custom && CustomMode == StretchShape
+            ? (double)wanted.Width / wanted.Height
+            : (double)output.Width / output.Height);
+        var cell = Math.Max(0, Array.IndexOf(Anchors, Anchor));
+        return new Rectangle(Place(target.Width - size.Width, cell % 3), Place(target.Height - size.Height, cell / 3),
+            size.Width, size.Height);
     }
 
     private static Size Largest(Size target, double ratio) => new(
