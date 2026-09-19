@@ -22,22 +22,27 @@ Video keeps its own aspect ratio and loops. It is muted by default and can be un
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Display aspect | **Input resolution**, 16:9, 4:3, 16:10, Stretch to screen, Custom size |
-| Custom size / sizing | e.g. `2732x2048` · **Fit to screen**, Actual pixels |
+| Custom size / sizing | e.g. `2732x2048` · **Fit to screen**, Actual pixels (crop, not squash) |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
 For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. Unlike an earlier version, the whole input is no longer force-squeezed to 4:3. Black bars baked into the source are left alone.
 
-**Display aspect** decides the shape of the rectangle the picture is drawn into, centred on the
-monitor. It does not crop and it does not change what the device captures: the whole frame is stretched
-into that rectangle, so picking a shape the source is not will squash it. `Input resolution` means the
-source's own shape, which is the undistorted one; the fixed ratios are there for a source whose reported
-resolution does not match its real shape.
+**Display aspect** cuts a region out of the captured frame. A capture card pillarboxes a 4:3 source
+into its 16:9 frame, so those black bars arrive as part of the picture; cropping them off is the point.
+Nothing is ever squashed to fit - `Stretch to screen` is the only choice that distorts. `Input
+resolution` crops nothing and shows the frame as it arrives.
 
-`Custom size` takes a size of your own, such as an iPad's `2732x2048`. `Fit to screen` keeps that shape
-and grows it until it touches an edge of the monitor. `Actual pixels` places it at exactly that many
-pixels, centred, which is what you want when the source resolution and the monitor do not divide evenly
-and you would rather not rescale at all.
+`Custom size` takes a size of your own, such as an iPad's `2732x2048`, and the sizing choice decides
+how it is read:
+
+- `Fit to screen` uses only its **shape**. It cuts the largest region of that shape out of the frame,
+  then draws it as large as the monitor allows. On a 3840x2160 capture of a 4:3 source this lands on
+  exactly `2880x2160` at x=480, which is precisely where the bars end.
+- `Actual pixels` uses it as a **literal pixel count**. It cuts exactly that many pixels from the middle
+  of the frame and draws them one source pixel per screen pixel, with no rescaling anywhere.
+
+Cropping happens in the capture engine, so the bars never travel down the pipe in the first place.
 
 Whatever the picture does not cover is **not drawn on**. The app's window is only as large as the
 picture, so the surround is still the wallpaper Windows was already showing - no black bars. Set the
@@ -61,7 +66,7 @@ With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`
 
 - `Sources.cs`: the file and capture input models.
 - `Playback.cs`: picks the playback path per input, LibVLC video playback, looping, errors and cleanup.
-- `CaptureOptions.cs`: pixel format, resolution, FPS, YUV conversion, display aspect.
+- `CaptureOptions.cs`: pixel format, resolution, FPS, YUV conversion, and the crop that takes the capture card's black bars off.
 - `CapturePlayback.cs`: FFmpeg DirectShow input, explicit color conversion, keeps the newest frame. Frames arrive over a named pipe. A redirected stdout pipe has a small buffer and stalls near 800 MB/s, while 4K 60fps BGRA needs 2.0 GB/s.
 - `CaptureSurface.cs`: presents BGRA frames through a DXGI flip-model swap chain and keeps the aspect ratio. Scaling runs on the GPU.
 - `DesktopHost.cs`: attaches the video window to the Windows Explorer WorkerW.

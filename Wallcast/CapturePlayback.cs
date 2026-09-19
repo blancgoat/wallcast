@@ -59,7 +59,8 @@ internal sealed class CapturePlayback : IDisposable
     private async Task ReadFrames()
     {
         var token = cancellation.Token;
-        var length = checked(Options.FrameSize.Width * Options.FrameSize.Height * 4);
+        // The engine sends the cropped picture, which is smaller than the frame the device captures.
+        var length = checked(Options.OutputSize.Width * Options.OutputSize.Height * 4);
         try
         {
             using (var connect = CancellationTokenSource.CreateLinkedTokenSource(token, startup.Token))

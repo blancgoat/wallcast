@@ -41,7 +41,7 @@ internal static class Program
                 var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
                     Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Aspects[5],
                     CustomSize: custom ?? "1920x1080", CustomScale: scale).Normalize();
-                Console.WriteLine($"AREA: aspect={settings.Aspect} custom={settings.CustomSize}/{settings.CustomScale} -> {settings.Fit(Screen.PrimaryScreen!.Bounds.Size)}");
+                Console.WriteLine($"AREA: aspect={settings.Aspect} custom={settings.CustomSize}/{settings.CustomScale} crop={settings.Crop} output={settings.OutputSize} -> {settings.Fit(Screen.PrimaryScreen!.Bounds.Size)}");
                 var area = settings.Fit(Screen.PrimaryScreen!.Bounds.Size);
                 area.Offset(Screen.PrimaryScreen!.Bounds.Location);
                 var host = new DesktopHost();
@@ -86,7 +86,7 @@ internal static class Program
                         var fitted = settings.Fit(bounds.Size);
                         // A moving source moves on while the screen is being grabbed, so the frame that
                         // is on screen is compared against several taken around the grab, not just one.
-                        var references = Collect(capture, settings.FrameSize, 3);
+                        var references = Collect(capture, settings.OutputSize, 3);
                         // Windows that refuse to minimise would otherwise read as a broken renderer, so
                         // only the points where our own wallpaper window is on top are compared.
                         var visible = MaskWallpaper(fitted);
@@ -94,7 +94,7 @@ internal static class Program
                         bool visibleAt(int x, int y) => !covers.Any(cover => cover.Contains(x, y));
                         using var screen = new Bitmap(bounds.Width, bounds.Height);
                         using (var g = Graphics.FromImage(screen)) g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
-                        references.AddRange(Collect(capture, settings.FrameSize, 3));
+                        references.AddRange(Collect(capture, settings.OutputSize, 3));
                         screen.Save("artifacts/desktop-capture.png", ImageFormat.Png);
                         if (references.Count == 0) { Console.WriteLine("FAIL: no frame to compare against"); return; }
                         var sampled = visible.Count(on => on);

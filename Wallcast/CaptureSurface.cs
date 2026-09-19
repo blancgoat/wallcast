@@ -27,7 +27,7 @@ internal sealed class CaptureSurface : Control
     public CaptureSurface(CapturePlayback capture)
     {
         this.capture = capture;
-        frame = capture.Options.FrameSize;
+        frame = capture.Options.OutputSize;
         SetStyle(ControlStyles.Opaque | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
         Dock = DockStyle.Fill;
         capture.FrameReady += OnFrameReady;
