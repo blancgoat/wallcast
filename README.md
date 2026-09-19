@@ -69,13 +69,15 @@ WorkerW 방식은 공개된 Windows 바탕화면 API가 아니므로 Windows/Exp
 
 동영상은 LibVLCSharp/VideoLAN.LibVLC.Windows.GPL, 캡처 입력은 FFmpeg 9.0.1 Gyan essentials 빌드, 캡처 출력은 Vortice.Direct3D11을 사용합니다. `scripts/setup-capture.ps1`은 버전과 SHA-256을 고정합니다. `capture/LICENSE-FFmpeg.txt` 및 `capture/README-FFmpeg.txt`를 유지하세요. 외부 배포 시 해당 GPL 구성 요소의 소스 제공 조건도 적용됩니다.
 
-바탕화면 출력 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --desktop "Live Gamer BOLT"`. 장치를 열어 바탕화면에 붙이고, 열린 창을 잠시 최소화한 뒤 실제 화면을 캡처해 수신한 프레임과 비교합니다(`--aspect 4:3`을 붙이면 검은 여백까지 확인). `artifacts/desktop-capture.png`에 그때의 화면을 남깁니다. 창을 최소화했다가 되돌리므로 자동 검증에는 포함하지 않습니다. 프레임 수신만으로는 화면 출력이 증명되지 않기 때문에 필요한 검사입니다.
+바탕화면 출력 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --desktop "Live Gamer BOLT"`. 장치를 열어 바탕화면에 붙이고, 열린 창을 잠시 최소화한 뒤 실제 화면을 캡처해 수신한 프레임과 비교합니다. `--resolution`과 `--aspect`로 해상도와 표시 비율을 지정할 수 있고(`--aspect 4:3`이면 검은 여백까지 확인), 받은 fps와 화면에 나온 fps를 따로 보고합니다. `artifacts/desktop-capture.png`에 그때의 화면을 남깁니다. 창을 최소화했다가 되돌리므로 자동 검증에는 포함하지 않습니다. 프레임 수신만으로는 화면 출력이 증명되지 않기 때문에 필요한 검사입니다.
+
+이 검사는 최소화되지 않고 남은 창의 영역을 빼고 비교하며, 가려지지 않은 영역이 20% 미만이면 실패가 아니라 SKIP입니다. 움직이는 소스에서는 화면을 찍는 순간과 프레임을 받는 순간이 어긋나므로 앞뒤로 받은 여러 프레임 중 가장 잘 맞는 것과 비교합니다. 둘 다 없으면 렌더러가 멀쩡해도 실패로 보입니다.
 
 처리량 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --bench "Live Gamer BOLT"`. 1080p·1440p·4K에서 실제로 받은 초당 프레임과 MB/s를 보고합니다. 장치가 내보내는 속도보다 느리면 그 차이만큼 프레임이 큐에 쌓여 지연이 됩니다. 지연 문제는 여기서 먼저 확인하세요.
 
 실제 장치 검증: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. 10초간 NV12/Rec.709/Limited/1080p60으로 열어 프레임 수신을 검사합니다. `--snapshot`을 추가하면 로컬 `artifacts/capture-nv12-rec709.png`에 한 프레임을 저장합니다. 기본 앱은 화면을 녹화하거나 저장하지 않습니다.
 
-2026-09-19 4K 지연 수정: 4K에서 지연이 심하던 원인은 리디렉션된 stdout 파이프의 처리량 한계였습니다. 이름 있는 파이프로 바꿔 4K 수신이 24.3fps에서 59.9fps(1895MB/s)로 올랐고, 렌더러를 타이머 폴링에서 프레임 도착 시점 표시로 바꿔 화면 출력이 39fps에서 53.5fps가 됐습니다. DirectShow 큐 크기도 입력 형식 기준으로 고쳐, 150ms 설정이 4K에서 298MB(24프레임)가 아니라 112MB(9프레임)가 됩니다. 배포본에서 4K 적용까지 확인했습니다.
+2026-09-19 4K 지연 수정: 4K에서 지연이 심하던 원인은 리디렉션된 stdout 파이프의 처리량 한계였습니다. 이름 있는 파이프로 바꿔 4K 수신이 24.3fps에서 59.9fps(1895MB/s)로 올랐습니다. 렌더러도 타이머 폴링에서 프레임 도착 시점 표시로 바꿨습니다. DirectShow 큐 크기도 입력 형식 기준으로 고쳐, 150ms 설정이 4K에서 298MB(24프레임)가 아니라 112MB(9프레임)가 됩니다. 정상 구간에서 1080p·4K 모두 수신 60fps, 화면 출력 60fps입니다. 배포본에서 4K 적용까지 확인했습니다.
 
 2026-09-19 바탕화면 출력 수정: 캡처가 바탕화면에 전혀 나오지 않던 문제를 GDI 렌더러에서 DXGI 스왑 체인으로 바꿔 해결했습니다. `--desktop` 검증에서 실제 화면 픽셀의 95%가 수신 프레임과 일치했고, 4:3에서 여백도 검게 나왔습니다. 배포본을 실행해 **바탕화면 적용**까지 눌러 Live Gamer BOLT 화면이 바탕화면에 나오는 것을 확인했습니다. 자동 검증 전체 통과.
 

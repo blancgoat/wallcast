@@ -49,7 +49,19 @@ internal static class Program
                 capture.Start();
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 var result = 2;
-                var probe = new System.Windows.Forms.Timer { Interval = 6000 };
+                // Startup costs a second of device negotiation and device creation, so rates are taken
+                // over a steady-state window rather than from the beginning.
+                double warmSeconds = 0; long warmFrames = 0, warmPresented = 0;
+                var warm = new System.Windows.Forms.Timer { Interval = 3000 };
+                warm.Tick += (_, _) =>
+                {
+                    warm.Stop();
+                    warmSeconds = clock.Elapsed.TotalSeconds;
+                    warmFrames = capture.Frames;
+                    warmPresented = surface.Presented;
+                };
+                warm.Start();
+                var probe = new System.Windows.Forms.Timer { Interval = 9000 };
                 probe.Tick += (_, _) =>
                 {
                     probe.Stop();
@@ -57,21 +69,30 @@ internal static class Program
                     try
                     {
                         if (trouble is not null) { Console.WriteLine("FAIL: " + trouble); return; }
-                        var seconds = clock.Elapsed.TotalSeconds;
-                        Console.WriteLine($"RATE {settings.Resolution}: {capture.Frames / seconds:F1} fps received, {surface.Presented / seconds:F1} fps on screen");
+                        var seconds = clock.Elapsed.TotalSeconds - warmSeconds;
+                        Console.WriteLine($"RATE {settings.Resolution}: {(capture.Frames - warmFrames) / seconds:F1} fps received, {(surface.Presented - warmPresented) / seconds:F1} fps on screen");
                         if (capture.Frames == 0) { Console.WriteLine("FAIL: no frames arrived from the device"); return; }
                         shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
                         shell!.GetType().InvokeMember("MinimizeAll", System.Reflection.BindingFlags.InvokeMethod, null, shell, null);
                         for (var i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(50); }
                         var bounds = Screen.PrimaryScreen!.Bounds;
+                        var fitted = settings.Fit(bounds.Size);
+                        // A moving source moves on while the screen is being grabbed, so the frame that
+                        // is on screen is compared against several taken around the grab, not just one.
+                        var references = Collect(capture, settings.FrameSize, 3);
+                        // Windows that refuse to minimise would otherwise read as a broken renderer, so
+                        // only the points where our own wallpaper window is on top are compared.
+                        var visible = MaskWallpaper(fitted);
                         using var screen = new Bitmap(bounds.Width, bounds.Height);
                         using (var g = Graphics.FromImage(screen)) g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
-                        var expected = DesktopReference(capture, settings, bounds);
+                        references.AddRange(Collect(capture, settings.FrameSize, 3));
                         screen.Save("artifacts/desktop-capture.png", ImageFormat.Png);
-                        if (expected is null) { Console.WriteLine("FAIL: no frame to compare against"); return; }
-                        var (matched, sampled) = Compare(screen, expected, settings.Fit(bounds.Size));
-                        Console.WriteLine($"RESULT: {matched}/{sampled} sampled desktop pixels match the captured frame");
-                        var fitted = settings.Fit(bounds.Size);
+                        if (references.Count == 0) { Console.WriteLine("FAIL: no frame to compare against"); return; }
+                        var sampled = visible.Count(on => on);
+                        if (sampled * 5 < visible.Length) { Console.WriteLine($"SKIP: only {sampled}/{visible.Length} of the wallpaper was uncovered, cannot verify"); return; }
+                        var shown = SampleScreen(screen, fitted);
+                        var matched = references.Max(reference => Matches(shown, reference, visible));
+                        Console.WriteLine($"RESULT: {matched}/{sampled} uncovered desktop pixels match the captured frame (best of {references.Count})");
                         if (fitted.X > 8)
                         {
                             var bar = screen.GetPixel(fitted.X / 2, bounds.Height / 2);
@@ -215,39 +236,100 @@ internal static class Program
         Console.WriteLine("PASS: PQ/HLG tone mapping, neutral gray, highlight ordering and peak selection");
     }
 
-    // The renderer consumes frames as they arrive, so take a fresh one as the comparison reference.
-    private static Bitmap? DesktopReference(CapturePlayback capture, CaptureOptions options, Rectangle bounds)
+    // WindowFromPoint cannot find our wallpaper window, because Explorer's WorkerW above it is disabled
+    // and that call skips disabled windows. So the covered area is worked out from every ordinary
+    // window still standing on the desktop instead.
+    private static bool[] MaskWallpaper(Rectangle target)
     {
-        byte[]? frame = null;
-        for (var i = 0; i < 200 && frame is null; i++) { frame = capture.TakeFrame(); if (frame is null) Thread.Sleep(10); }
-        if (frame is null) return null;
-        try
+        var covers = new List<Rectangle>();
+        var name = new System.Text.StringBuilder(64);
+        EnumWindows((window, _) =>
         {
-            var size = options.FrameSize;
-            var image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppRgb);
-            var data = image.LockBits(new Rectangle(Point.Empty, size), ImageLockMode.WriteOnly, PixelFormat.Format32bppRgb);
-            try { Marshal.Copy(frame, 0, data.Scan0, size.Width * size.Height * 4); }
-            finally { image.UnlockBits(data); }
-            return image;
-        }
-        finally { CapturePlayback.ReturnFrame(frame); }
+            if (!IsWindowVisible(window) || IsIconic(window)) return true;
+            GetClassName(window, name, name.Capacity);
+            if (name.ToString() is "Progman" or "WorkerW") return true;
+            if (DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            if (GetWindowRect(window, out var box) && box.Right > box.Left && box.Bottom > box.Top)
+                covers.Add(Rectangle.FromLTRB(box.Left, box.Top, box.Right, box.Bottom));
+            return true;
+        }, IntPtr.Zero);
+        var mask = new bool[(Grid - First) * (Grid - First)];
+        var at = 0;
+        for (var y = First; y < Grid; y++)
+            for (var x = First; x < Grid; x++)
+            {
+                var point = new Point(target.X + target.Width * x / Grid, target.Y + target.Height * y / Grid);
+                mask[at++] = !covers.Any(cover => cover.Contains(point));
+            }
+        return mask;
     }
 
-    private static (int matched, int sampled) Compare(Bitmap screen, Bitmap reference, Rectangle target)
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out RECT box);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int max);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
+
+    // Frames are compared as a small grid of samples rather than whole bitmaps, so several of them can
+    // be held around the moment of the screen grab without copying megabytes each time.
+    private const int Grid = 100, First = 8;
+
+    private static List<int[]> Collect(CapturePlayback capture, Size size, int count)
     {
-        int matched = 0, sampled = 0;
-        for (var y = 8; y < 100; y++)
-            for (var x = 8; x < 100; x++)
+        var taken = new List<int[]>();
+        for (var i = 0; i < count * 40 && taken.Count < count; i++)
+        {
+            var frame = capture.TakeFrame();
+            if (frame is null) { Thread.Sleep(5); continue; }
+            try { taken.Add(SampleFrame(frame, size)); }
+            finally { CapturePlayback.ReturnFrame(frame); }
+        }
+        return taken;
+    }
+
+    private static int[] SampleFrame(byte[] frame, Size size)
+    {
+        var samples = new int[(Grid - First) * (Grid - First)];
+        var at = 0;
+        for (var y = First; y < Grid; y++)
+            for (var x = First; x < Grid; x++)
             {
-                var sx = target.X + target.Width * x / 100;
-                var sy = target.Y + target.Height * y / 100;
-                if (sx >= screen.Width || sy >= screen.Height) continue;
-                var shown = screen.GetPixel(sx, sy);
-                var want = reference.GetPixel(reference.Width * x / 100, reference.Height * y / 100);
-                sampled++;
-                // The frame is scaled on the GPU and the two grabs are moments apart, so allow drift.
-                if (Math.Abs(shown.R - want.R) + Math.Abs(shown.G - want.G) + Math.Abs(shown.B - want.B) <= 60) matched++;
+                var offset = size.Height * y / Grid * size.Width * 4 + size.Width * x / Grid * 4;
+                samples[at++] = (frame[offset + 2] << 16) | (frame[offset + 1] << 8) | frame[offset];
             }
-        return (matched, sampled);
+        return samples;
+    }
+
+    private static int[] SampleScreen(Bitmap screen, Rectangle target)
+    {
+        var samples = new int[(Grid - First) * (Grid - First)];
+        var at = 0;
+        for (var y = First; y < Grid; y++)
+            for (var x = First; x < Grid; x++)
+            {
+                var sx = Math.Min(screen.Width - 1, target.X + target.Width * x / Grid);
+                var sy = Math.Min(screen.Height - 1, target.Y + target.Height * y / Grid);
+                var shown = screen.GetPixel(sx, sy);
+                samples[at++] = (shown.R << 16) | (shown.G << 8) | shown.B;
+            }
+        return samples;
+    }
+
+    private static int Matches(int[] shown, int[] reference, bool[] visible)
+    {
+        var matched = 0;
+        for (var i = 0; i < shown.Length; i++)
+        {
+            if (!visible[i]) continue;
+            // The frame is scaled on the GPU and sampled a moment apart, so allow some drift.
+            var drift = Math.Abs((shown[i] >> 16 & 255) - (reference[i] >> 16 & 255))
+                + Math.Abs((shown[i] >> 8 & 255) - (reference[i] >> 8 & 255))
+                + Math.Abs((shown[i] & 255) - (reference[i] & 255));
+            if (drift <= 60) matched++;
+        }
+        return matched;
     }
 }
