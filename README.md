@@ -21,26 +21,34 @@ Video keeps its own aspect ratio and loops. It is muted by default and can be un
 | Resolution / FPS | **1920×1080 / 60**, 720p·1440p·4K and others / 59.94·50·30 and others |
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
-| Display aspect | **Input resolution**, 16:9, 4:3, 16:10, Stretch to screen, Custom size |
-| Custom size / sizing | e.g. `2732x2048` · **Fit to screen**, Actual pixels (crop, not squash) |
+| Display aspect | **Input resolution**, Stretch to screen, Custom size |
+| Custom size / sizing | e.g. `2732x2048` · **Crop, fit to screen**, Crop actual pixels, Stretch frame to this shape |
+| Crop anchor | 3x3 grid, **Center** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
 For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. Unlike an earlier version, the whole input is no longer force-squeezed to 4:3. Black bars baked into the source are left alone.
 
-**Display aspect** cuts a region out of the captured frame. A capture card pillarboxes a 4:3 source
-into its 16:9 frame, so those black bars arrive as part of the picture; cropping them off is the point.
-Nothing is ever squashed to fit - `Stretch to screen` is the only choice that distorts. `Input
-resolution` crops nothing and shows the frame as it arrives.
+**Display aspect** decides what happens to the captured frame before it reaches the desktop.
+`Input resolution` leaves it alone. `Stretch to screen` fills the monitor and is the only choice that
+distorts. `Custom size` takes a size of your own, such as an iPad's `2732x2048`, and **Custom sizing**
+says how to read it:
 
-`Custom size` takes a size of your own, such as an iPad's `2732x2048`, and the sizing choice decides
-how it is read:
+- `Crop, fit to screen` uses its **shape**. It cuts the largest region of that shape out of the frame
+  and draws it as large as the monitor allows. This is the one for a card that pillarboxes: on a
+  3840x2160 capture of a 4:3 source it lands on exactly `2880x2160` at x=480, where the bars end.
+- `Crop, actual pixels` uses it as a **literal pixel count**. It cuts exactly that many pixels and draws
+  them one source pixel per screen pixel, with no rescaling anywhere.
+- `Stretch frame to this shape` crops nothing. It takes the whole frame and gives it that shape. This is
+  the one for an older card that squeezes the source into its frame instead of pillarboxing it, where
+  there are no bars to cut and the picture only needs its proportions back.
 
-- `Fit to screen` uses only its **shape**. It cuts the largest region of that shape out of the frame,
-  then draws it as large as the monitor allows. On a 3840x2160 capture of a 4:3 source this lands on
-  exactly `2880x2160` at x=480, which is precisely where the bars end.
-- `Actual pixels` uses it as a **literal pixel count**. It cuts exactly that many pixels from the middle
-  of the frame and draws them one source pixel per screen pixel, with no rescaling anywhere.
+**Crop anchor** is the 3x3 grid, read like a canvas-size anchor: it picks which part of the frame the
+crop keeps. It applies to both crop modes and is ignored while stretching, since nothing is cut. The
+picture itself always sits in the middle of the monitor.
+
+There are no fixed 16:9 / 4:3 entries. Under cropping they would only be a clumsier custom size, and if
+a fixed ratio is ever wanted it will be wanted as a stretch, not a crop.
 
 Cropping happens in the capture engine, so the bars never travel down the pipe in the first place.
 

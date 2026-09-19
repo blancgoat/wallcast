@@ -25,7 +25,12 @@ internal sealed class MainForm : Form
     private readonly ComboBox colorRange = Choice(CaptureOptions.ColorRanges);
     private readonly ComboBox aspect = Choice(CaptureOptions.Aspects);
     private readonly TextBox customSize = new() { Width = 325, Margin = new Padding(3, 4, 3, 4), PlaceholderText = "2732x2048" };
-    private readonly ComboBox customScale = Choice(CaptureOptions.CustomScales);
+    private readonly ComboBox customMode = Choice(CaptureOptions.CustomModes);
+    // A canvas-size anchor: nine cells, the arrows pointing the way the crop is pulled.
+    private static readonly string[] AnchorGlyphs = ["↖", "↑", "↗", "←", "●", "→", "↙", "↓", "↘"];
+    private readonly RadioButton[] anchorCells = new RadioButton[CaptureOptions.Anchors.Length];
+    private readonly TableLayoutPanel anchorGrid = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 3, Margin = new Padding(3, 4, 3, 4) };
+    private readonly ToolTip anchorTips = new();
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
     private readonly NotifyIcon tray;
@@ -41,8 +46,8 @@ internal sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.None;
         Text = "Wallcast · Live wallpaper";
         AutoScaleDimensions = new SizeF(96, 96);
-        ClientSize = new Size(580, 790);
-        MinimumSize = new Size(580, 610);
+        ClientSize = new Size(580, 905);
+        MinimumSize = new Size(580, 660);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(246, 247, 250);
         var body = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28), AutoScroll = true };
@@ -71,8 +76,22 @@ internal sealed class MainForm : Form
         AddCaptureSetting("HDR peak (nits)", hdrPeak);
         AddCaptureSetting("Display aspect", aspect);
         AddCaptureSetting("Custom size (W x H)", customSize);
-        AddCaptureSetting("Custom sizing", customScale);
+        AddCaptureSetting("Custom sizing", customMode);
+        for (var cell = 0; cell < anchorCells.Length; cell++)
+        {
+            var button = new RadioButton
+            {
+                Appearance = Appearance.Button, Text = AnchorGlyphs[cell], Tag = CaptureOptions.Anchors[cell],
+                Width = 30, Height = 28, Margin = new Padding(1), TextAlign = ContentAlignment.MiddleCenter,
+                Checked = CaptureOptions.Anchors[cell] == "Center"
+            };
+            anchorTips.SetToolTip(button, CaptureOptions.Anchors[cell]);
+            anchorCells[cell] = button;
+            anchorGrid.Controls.Add(button, cell % 3, cell / 3);
+        }
+        AddCaptureSetting("Crop anchor", anchorGrid);
         aspect.SelectedIndexChanged += (_, _) => UpdateAspectControls();
+        customMode.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         UpdateAspectControls();
         dynamicRange.SelectedIndexChanged += (_, _) => UpdateHdrControls();
         UpdateHdrControls();
@@ -229,8 +248,11 @@ internal sealed class MainForm : Form
     // The custom size only means anything for the Custom entry, so it stays out of the way otherwise.
     private void UpdateAspectControls()
     {
-        var custom = aspect.Text == CaptureOptions.Aspects[5];
-        customSize.Enabled = customScale.Enabled = custom;
+        var custom = aspect.Text == CaptureOptions.Custom;
+        customSize.Enabled = customMode.Enabled = custom;
+        // Nothing is cut away when the frame is only being reshaped, so the anchor has nothing to say.
+        var cropping = custom && customMode.Text != CaptureOptions.StretchShape;
+        foreach (var cell in anchorCells) cell.Enabled = cropping;
     }
     private void UpdateHdrControls()
     {
@@ -240,13 +262,14 @@ internal sealed class MainForm : Form
         if (hdr) colorSpace.SelectedItem = "Rec.2020";
         else if (colorSpace.Text == "Rec.2020") colorSpace.SelectedItem = "Rec.709";
     }
-    private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customScale.Text);
+    private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor);
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)
     {
         using var stream = typeof(MainForm).Assembly.GetManifestResourceStream("Wallcast.Wallcast.ico");
         return stream is null ? SystemIcons.Application : new Icon(stream, new Size(size, size));
     }
+    private string SelectedAnchor => anchorCells.FirstOrDefault(cell => cell.Checked)?.Tag as string ?? "Center";
     private static FlowLayoutPanel Row() => new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0, 8, 0, 0) };
     private static Label Caption(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(0, 16, 0, 5) };
     private static Button Button(string text, EventHandler click)
@@ -283,7 +306,8 @@ internal sealed class MainForm : Form
             fps.SelectedItem = options.Fps; colorSpace.SelectedItem = options.ColorSpace;
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
-            customSize.Text = options.CustomSize; customScale.SelectedItem = options.CustomScale;
+            customSize.Text = options.CustomSize; customMode.SelectedItem = options.CustomMode;
+            foreach (var cell in anchorCells) cell.Checked = (string?)cell.Tag == options.Anchor;
             UpdateAspectControls();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { status.Text = "Could not read saved settings, started with defaults."; }

@@ -37,11 +37,12 @@ internal static class Program
                 var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault();
                 var res = args.SkipWhile(a => a != "--resolution").Skip(1).FirstOrDefault();
                 var custom = args.SkipWhile(a => a != "--custom").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
-                var scale = args.Contains("--actual") ? CaptureOptions.CustomScales[1] : CaptureOptions.CustomScales[0];
+                var mode = args.Contains("--actual") ? CaptureOptions.CropActual : args.Contains("--squeeze") ? CaptureOptions.StretchShape : CaptureOptions.CropFit;
+                var anchor = args.SkipWhile(a => a != "--anchor").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? "Center";
                 var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
-                    Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Aspects[5],
-                    CustomSize: custom ?? "1920x1080", CustomScale: scale).Normalize();
-                Console.WriteLine($"AREA: aspect={settings.Aspect} custom={settings.CustomSize}/{settings.CustomScale} crop={settings.Crop} output={settings.OutputSize} -> {settings.Fit(Screen.PrimaryScreen!.Bounds.Size)}");
+                    Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Custom,
+                    CustomSize: custom ?? "1920x1080", CustomMode: mode, Anchor: anchor).Normalize();
+                Console.WriteLine($"AREA: aspect={settings.Aspect} custom={settings.CustomSize}/{settings.CustomMode}/{settings.Anchor} crop={settings.Crop} output={settings.OutputSize} -> {settings.Fit(Screen.PrimaryScreen!.Bounds.Size)}");
                 var area = settings.Fit(Screen.PrimaryScreen!.Bounds.Size);
                 area.Offset(Screen.PrimaryScreen!.Bounds.Location);
                 var host = new DesktopHost();
@@ -199,9 +200,31 @@ internal static class Program
             catch (FileNotFoundException) { Console.WriteLine("PASS: Missing file rejected"); }
             try { new CaptureOptions().CreateStartInfo("", 150, "pipe:1"); throw new Exception("Empty device accepted"); }
             catch (InvalidOperationException) { Console.WriteLine("PASS: Empty device rejected"); }
-            if (new CaptureOptions().Fit(new Size(3840, 2160)) != new Rectangle(0, 0, 3840, 2160)) throw new Exception("16:9 geometry distorted");
-            if (new CaptureOptions(Aspect: "4:3").Fit(new Size(3840, 2160)) != new Rectangle(480, 0, 2880, 2160)) throw new Exception("4:3 geometry distorted");
-            Console.WriteLine("PASS: Native aspect and 4:3 pillarboxing");
+            var screen = new Size(3840, 2160);
+            if (new CaptureOptions().Fit(screen) != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Uncropped geometry distorted");
+            // A 4:3 source pillarboxed into a 3840x2160 frame has exactly 480px of bar each side.
+            var pillar = new CaptureOptions(Resolution: "3840x2160", Aspect: CaptureOptions.Custom, CustomSize: "2732x2048");
+            if (pillar.Crop != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Pillarbox not cropped off: " + pillar.Crop);
+            if (pillar.Fit(screen) != new Rectangle(480, 0, 2880, 2160)) throw new Exception("Cropped picture not placed 1:1");
+            if (!pillar.ConversionFilter.StartsWith("crop=2880:2160:480:0,")) throw new Exception("Crop missing from the filter chain");
+            foreach (var (anchor, expected) in new[]
+            {
+                ("Top left", new Rectangle(0, 0, 2880, 2160)), ("Right", new Rectangle(960, 0, 2880, 2160)),
+                ("Bottom right", new Rectangle(960, 0, 2880, 2160)), ("Center", new Rectangle(480, 0, 2880, 2160)),
+            })
+                if ((pillar with { Anchor = anchor }).Crop != expected) throw new Exception($"Anchor {anchor} placed the crop wrong");
+            // Actual pixels cuts exactly what was asked for and draws it without rescaling.
+            var exact = pillar with { CustomMode = CaptureOptions.CropActual };
+            if (exact.Crop != new Rectangle(554, 56, 2732, 2048) || exact.Fit(screen) != new Rectangle(554, 56, 2732, 2048))
+                throw new Exception("Actual pixels did not stay 1:1");
+            if ((exact with { Anchor = "Top left" }).Crop != new Rectangle(0, 0, 2732, 2048)) throw new Exception("Anchor ignored at actual pixels");
+            // Stretching an anamorphic frame crops nothing and only gives the picture its shape back.
+            var squeezed = pillar with { CustomMode = CaptureOptions.StretchShape };
+            if (squeezed.Crop != new Rectangle(0, 0, 3840, 2160)) throw new Exception("Stretch should not crop");
+            if (squeezed.ConversionFilter.Contains("crop=")) throw new Exception("Stretch should not add a crop filter");
+            // Screen placement needs no even rounding, so this lands on the exact 2732:2048 ratio.
+            if (squeezed.Fit(screen) != new Rectangle(479, 0, 2881, 2160)) throw new Exception("Stretch did not reshape to the custom aspect: " + squeezed.Fit(screen));
+            Console.WriteLine("PASS: crop anchors, actual pixels and anamorphic stretch");
             TestColors();
             using var control = new Control();
             using var playback = new Playback(control);

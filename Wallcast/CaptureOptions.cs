@@ -7,16 +7,26 @@ internal sealed record CaptureOptions(
     string Format = "NV12", string Resolution = "1920x1080", string Fps = "60",
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000",
-    string CustomSize = "1920x1080", string CustomScale = "Fit to screen")
+    string CustomSize = "1920x1080", string CustomMode = "Crop, fit to screen", string Anchor = "Center")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
     public static readonly string[] FrameRates = ["60", "59.94", "50", "30", "29.97", "25", "24"];
     public static readonly string[] ColorSpaces = ["Rec.709", "Rec.601", "Rec.2020"];
     public static readonly string[] ColorRanges = ["Limited", "Full"];
-    public static readonly string[] Aspects = ["Input resolution", "16:9", "4:3", "16:10", "Stretch to screen", "Custom size"];
-    // Fit keeps the custom shape but grows it to the screen; Actual pixels places it at its own size.
-    public static readonly string[] CustomScales = ["Fit to screen", "Actual pixels"];
+    // Fixed ratios are gone on purpose. Under crop they would only ever be a worse-spelled custom
+    // size, and the day a fixed ratio is genuinely wanted it will want to scale, not crop.
+    public const string AsCaptured = "Input resolution", Stretch = "Stretch to screen", Custom = "Custom size";
+    public static readonly string[] Aspects = [AsCaptured, Stretch, Custom];
+    // Crop is for a card that pillarboxes the source, leaving real black bars in the frame. Stretch is
+    // for an older one that squeezes the whole source into its frame instead, where there is nothing to
+    // cut off and the picture just has to be given its shape back.
+    public const string CropFit = "Crop, fit to screen", CropActual = "Crop, actual pixels",
+        StretchShape = "Stretch frame to this shape";
+    public static readonly string[] CustomModes = [CropFit, CropActual, StretchShape];
+    // Which part of the frame the crop keeps, laid out like a canvas-size anchor.
+    public static readonly string[] Anchors =
+        ["Top left", "Top", "Top right", "Left", "Center", "Right", "Bottom left", "Bottom", "Bottom right"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
 
@@ -30,7 +40,8 @@ internal sealed record CaptureOptions(
         DynamicRanges.Contains(DynamicRange) ? DynamicRange : DynamicRanges[0],
         HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
         Measure(CustomSize) is { } size ? $"{size.Width}x{size.Height}" : "1920x1080",
-        CustomScales.Contains(CustomScale) ? CustomScale : CustomScales[0]);
+        CustomModes.Contains(CustomMode) ? CustomMode : CustomModes[0],
+        Anchors.Contains(Anchor) ? Anchor : "Center");
 
     // Accepts 1920x1080 and 1920 x 1080 alike, and rejects anything that is not a usable frame.
     public static Size? Measure(string value)
@@ -111,17 +122,24 @@ internal sealed record CaptureOptions(
         get
         {
             var frame = FrameSize;
-            if (Aspect == Aspects[0] || Aspect == Aspects[4]) return new Rectangle(Point.Empty, frame);
-            if (Aspect == Aspects[5])
-            {
-                var custom = Measure(CustomSize) ?? new Size(1920, 1080);
-                return CustomScale == CustomScales[1]
-                    ? Even(Centre(frame, Math.Min(frame.Width, custom.Width), Math.Min(frame.Height, custom.Height)))
-                    : Even(Largest(frame, (double)custom.Width / custom.Height));
-            }
-            return Even(Largest(frame, Aspect switch { "16:9" => 16d / 9, "4:3" => 4d / 3, _ => 1.6 }));
+            // Stretching reshapes the whole frame, so there is nothing to cut away.
+            if (Aspect != Custom || CustomMode == StretchShape) return new Rectangle(Point.Empty, frame);
+            var wanted = Measure(CustomSize) ?? new Size(1920, 1080);
+            var size = CustomMode == CropActual
+                ? new Size(Math.Min(frame.Width, wanted.Width), Math.Min(frame.Height, wanted.Height))
+                : Largest(frame, (double)wanted.Width / wanted.Height);
+            // Sizing before placing keeps the anchor exact; rounding a placed rectangle drags the bar
+            // we are removing back into the picture.
+            size = new Size(size.Width & ~1, size.Height & ~1);
+            var cell = Math.Max(0, Array.IndexOf(Anchors, Anchor));
+            return new Rectangle(Place(frame.Width - size.Width, cell % 3), Place(frame.Height - size.Height, cell / 3),
+                size.Width, size.Height);
         }
     }
+
+    // 0 hugs the near edge, 2 the far edge, 1 sits in the middle of whatever room is left over.
+    private static int Place(int slack, int position) =>
+        Math.Clamp((position switch { 0 => 0, 2 => slack, _ => slack / 2 }) & ~1, 0, slack);
 
     // What actually leaves the capture engine, which is the frame minus whatever was cropped away.
     [System.Text.Json.Serialization.JsonIgnore]
@@ -131,26 +149,23 @@ internal sealed record CaptureOptions(
     // user's own wallpaper shows there.
     public Rectangle Fit(Size target)
     {
-        if (Aspect == Aspects[4]) return new Rectangle(Point.Empty, target);
+        if (Aspect == Stretch) return new Rectangle(Point.Empty, target);
         var output = OutputSize;
+        var wanted = Measure(CustomSize) ?? new Size(1920, 1080);
         // Actual pixels means exactly that: the cropped picture lands one source pixel per screen pixel.
-        if (Aspect == Aspects[5] && CustomScale == CustomScales[1])
-            return Centre(target, Math.Min(target.Width, output.Width), Math.Min(target.Height, output.Height));
-        return Largest(target, (double)output.Width / output.Height);
+        var size = Aspect == Custom
+            ? CustomMode switch
+            {
+                CropActual => new Size(Math.Min(target.Width, output.Width), Math.Min(target.Height, output.Height)),
+                StretchShape => Largest(target, (double)wanted.Width / wanted.Height),
+                _ => Largest(target, (double)output.Width / output.Height)
+            }
+            : Largest(target, (double)output.Width / output.Height);
+        return new Rectangle((target.Width - size.Width) / 2, (target.Height - size.Height) / 2, size.Width, size.Height);
     }
 
-    // Subsampled formats cannot be cut on an odd boundary. Rounding the origin inwards rather than
-    // outwards matters: rounding out drags the bar we are trying to remove back into the picture.
-    private static Rectangle Even(Rectangle area)
-    {
-        int x = (area.X + 1) & ~1, y = (area.Y + 1) & ~1;
-        return new Rectangle(x, y, (area.Width - (x - area.X)) & ~1, (area.Height - (y - area.Y)) & ~1);
-    }
-
-    private static Rectangle Largest(Size target, double ratio) => Centre(target,
+    private static Size Largest(Size target, double ratio) => new(
         Math.Min(target.Width, (int)Math.Round(target.Height * ratio)),
         Math.Min(target.Height, (int)Math.Round(target.Width / ratio)));
 
-    private static Rectangle Centre(Size target, int width, int height) =>
-        new((target.Width - width) / 2, (target.Height - height) / 2, width, height);
 }
