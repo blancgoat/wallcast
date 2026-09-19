@@ -1,4 +1,4 @@
-# Still
+# Wallcast
 
 [한국어](README.ko.md)
 
@@ -6,7 +6,7 @@ A small video wallpaper app for Windows. Pick one video file or one capture devi
 
 ## Use
 
-1. Run `artifacts/Still/Wallpaper.exe`.
+1. Run `artifacts/Wallcast/Wallcast.exe`.
 2. Choose a file under **Video file**, or a device under **Capture card / virtual camera**.
 3. Pick the output monitor and press **Apply to desktop**.
 4. **Stop** brings your original wallpaper back. The window's X hides to the tray; **Exit** in the tray menu quits for real.
@@ -35,11 +35,11 @@ Needs Windows x64 and the .NET 8 SDK. Prepare the capture engine before the firs
 
 ```powershell
 ./scripts/setup-capture.ps1
-dotnet run --project Wallpaper
-dotnet publish Wallpaper -c Release -r win-x64 --self-contained true -o artifacts/Still
+dotnet run --project Wallcast
+dotnet publish Wallcast -c Release -r win-x64 --self-contained true -o artifacts/Wallcast
 ```
 
-With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`. Distribution needs the whole `artifacts/Still` folder; this is not a single-exe build. Publish into an empty folder. Overwriting an existing one can leave a framework assembly in place when its timestamp is newer than the package version's, and the app then fails at startup loading `System.Text.Json`.
+With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`. Distribution needs the whole `artifacts/Wallcast` folder; this is not a single-exe build. Publish into an empty folder. Overwriting an existing one can leave a framework assembly in place when its timestamp is newer than the package version's, and the app then fails at startup loading `System.Text.Json`.
 
 ## Scope and layout
 
@@ -51,8 +51,11 @@ With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`
 - `DesktopHost.cs`: attaches the video window to the Windows Explorer WorkerW.
 - `CaptureDevices.cs`: DirectShow video device discovery.
 - `MainForm.cs`: settings, monitor selection, tray, local settings file.
+- `scripts/make-icon.ps1`: draws `Wallcast.ico`. Every size is drawn natively, since the two icon
+  silhouettes turn to mush when a large drawing is scaled down. `-PngDirectory` also writes the
+  sizes out as PNG.
 
-Settings live in `%LOCALAPPDATA%\Still\settings.json`. The app does not auto-play on launch and does not add itself to Windows startup. Simultaneous playback on several monitors, an editor, web backgrounds and a workshop are all out of scope.
+Settings live in `%LOCALAPPDATA%\Wallcast\settings.json`. The app does not auto-play on launch and does not add itself to Windows startup. Simultaneous playback on several monitors, an editor, web backgrounds and a workshop are all out of scope.
 
 The Explorer window this attaches to has no GDI redirection surface. Pixels painted there with GDI are never composited, so both video (LibVLC's Direct3D11 output) and capture (the swap chain above) reach the screen only through a D3D path. Draw the capture with GDI and frames arrive normally, the control paints normally, and the desktop shows nothing at all.
 

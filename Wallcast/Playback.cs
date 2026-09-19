@@ -1,7 +1,7 @@
 using LibVLCSharp.Shared;
 using System.Collections.Concurrent;
 
-namespace Still;
+namespace Wallcast;
 
 internal sealed class Playback : IDisposable
 {

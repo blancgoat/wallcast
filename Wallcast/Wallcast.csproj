@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Wallcast.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="LibVLCSharp" Version="3.10.1" />
@@ -17,6 +18,8 @@
     <PackageReference Include="System.Text.Json" Version="9.0.1" />
   </ItemGroup>
   <ItemGroup>
+    <!-- ApplicationIcon only reaches the exe's shell icon; the window and tray load this copy. -->
+    <EmbeddedResource Include="Wallcast.ico" />
     <Content Include="../.tools/capture/*" Link="capture/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="CheckCaptureEngine" BeforeTargets="PrepareForBuild">

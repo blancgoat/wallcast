@@ -1,6 +1,6 @@
 using LibVLCSharp.Shared;
 
-namespace Still;
+namespace Wallcast;
 
 // A new input type only needs to supply media and its playback policy.
 internal interface IWallpaperSource

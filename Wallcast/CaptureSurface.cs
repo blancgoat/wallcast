@@ -3,7 +3,7 @@ using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 
-namespace Still;
+namespace Wallcast;
 
 // Explorer's desktop window has no GDI redirection surface, so anything painted into it with GDI is
 // never composited. Frames reach the screen only through a DXGI flip-model swap chain, which is the

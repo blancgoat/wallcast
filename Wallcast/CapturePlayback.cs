@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
 
-namespace Still;
+namespace Wallcast;
 
 // DirectShow -> explicitly selected YUV conversion -> BGRA. No encoding or disk recording.
 internal sealed class CapturePlayback : IDisposable
@@ -31,9 +31,9 @@ internal sealed class CapturePlayback : IDisposable
     public CapturePlayback(string device, int buffer, CaptureOptions options)
     {
         Options = options;
-        var name = "still-" + Guid.NewGuid().ToString("N");
+        var name = "wallcast-" + Guid.NewGuid().ToString("N");
         var info = options.CreateStartInfo(device, buffer, @"\\.\pipe\" + name);
-        if (!File.Exists(info.FileName)) throw new FileNotFoundException("The capture engine is missing. Copy the whole Still folder again.", info.FileName);
+        if (!File.Exists(info.FileName)) throw new FileNotFoundException("The capture engine is missing. Copy the whole Wallcast folder again.", info.FileName);
         pipe = new NamedPipeServerStream(name, PipeDirection.In, 1, PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous, PipeBuffer, PipeBuffer);
         process = new Process { StartInfo = info, EnableRaisingEvents = true };

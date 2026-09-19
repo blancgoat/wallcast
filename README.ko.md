@@ -1,4 +1,4 @@
-# Still
+# Wallcast
 
 [English](README.md)
 
@@ -6,7 +6,7 @@ Windows용 작은 영상 바탕화면 앱. 동영상 또는 캡처 장치 하나
 
 ## 사용
 
-1. `artifacts/Still/Wallpaper.exe` 실행.
+1. `artifacts/Wallcast/Wallcast.exe` 실행.
 2. **동영상 파일**에서 파일을 선택하거나 **캡처보드 / 가상 카메라**에서 장치 선택.
 3. 출력 모니터를 선택하고 **바탕화면 적용**.
 4. **중지**하면 기존 배경이 다시 보입니다. 창의 X는 트레이로 숨기며, 완전 종료는 트레이 메뉴의 **종료**입니다.
@@ -35,11 +35,11 @@ Windows x64와 .NET 8 SDK 필요. 최초 빌드 전에 캡처 엔진을 준비�
 
 ```powershell
 ./scripts/setup-capture.ps1
-dotnet run --project Wallpaper
-dotnet publish Wallpaper -c Release -r win-x64 --self-contained true -o artifacts/Still
+dotnet run --project Wallcast
+dotnet publish Wallcast -c Release -r win-x64 --self-contained true -o artifacts/Wallcast
 ```
 
-프로젝트 로컬 SDK가 있으면 `dotnet` 대신 `.\.tools\dotnet\dotnet.exe` 사용. 배포 시 `artifacts/Still` 폴더 전체가 필요합니다. 단일 exe 배포가 아닙니다. publish는 빈 폴더에 하세요. 기존 폴더에 덮어쓰면 프레임워크 어셈블리가 패키지 버전보다 최신 타임스탬프를 가진 경우 교체되지 않아, 실행 시 `System.Text.Json` 로드 실패가 납니다.
+프로젝트 로컬 SDK가 있으면 `dotnet` 대신 `.\.tools\dotnet\dotnet.exe` 사용. 배포 시 `artifacts/Wallcast` 폴더 전체가 필요합니다. 단일 exe 배포가 아닙니다. publish는 빈 폴더에 하세요. 기존 폴더에 덮어쓰면 프레임워크 어셈블리가 패키지 버전보다 최신 타임스탬프를 가진 경우 교체되지 않아, 실행 시 `System.Text.Json` 로드 실패가 납니다.
 
 ## 범위와 구조
 
@@ -51,8 +51,10 @@ dotnet publish Wallpaper -c Release -r win-x64 --self-contained true -o artifact
 - `DesktopHost.cs`: Windows Explorer WorkerW에 영상 창 연결.
 - `CaptureDevices.cs`: DirectShow 비디오 장치 검색.
 - `MainForm.cs`: 설정, 모니터 선택, 트레이, 로컬 설정 저장.
+- `scripts/make-icon.ps1`: `Wallcast.ico`를 그립니다. 큰 그림을 줄이면 아이콘 실루엣 두 개가 뭉개져서
+  크기마다 따로 그립니다. `-PngDirectory`를 주면 PNG로도 내보냅니다.
 
-설정은 `%LOCALAPPDATA%\Still\settings.json`에 저장합니다. 앱 시작 시 자동 재생하거나 Windows 시작 프로그램에 등록하지 않습니다. 다중 모니터 동시 재생, 편집기, 웹 배경, 워크숍은 포함하지 않습니다.
+설정은 `%LOCALAPPDATA%\Wallcast\settings.json`에 저장합니다. 앱 시작 시 자동 재생하거나 Windows 시작 프로그램에 등록하지 않습니다. 다중 모니터 동시 재생, 편집기, 웹 배경, 워크숍은 포함하지 않습니다.
 
 바탕화면에 붙는 Explorer 창에는 GDI 리디렉션 표면이 없습니다. 그래서 그 안에서는 GDI로 그린 픽셀이 화면에 합성되지 않으며, 영상(LibVLC의 Direct3D11 출력)과 캡처(위 스왑 체인) 모두 D3D 경로로만 표시됩니다. 캡처를 GDI로 그리면 프레임이 정상적으로 들어오고 컨트롤이 칠해져도 바탕화면에는 아무것도 나오지 않습니다.
 

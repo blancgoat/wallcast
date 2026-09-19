@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 
-namespace Still;
+namespace Wallcast;
 
 internal sealed record CaptureOptions(
     string Format = "NV12", string Resolution = "1920x1080", string Fps = "60",

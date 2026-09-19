@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Still;
+namespace Wallcast;
 
 internal sealed class MainForm : Form
 {
@@ -28,13 +28,13 @@ internal sealed class MainForm : Form
     private Playback? playback;
     private bool exiting;
     private Screen[] screens = [];
-    private static readonly string SettingsPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Still", "settings.json");
+    private static readonly string SettingsPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wallcast", "settings.json");
 
     public MainForm()
     {
         SuspendLayout();
         AutoScaleMode = AutoScaleMode.None;
-        Text = "Still · Moving wallpaper";
+        Text = "Wallcast · Live wallpaper";
         AutoScaleDimensions = new SizeF(96, 96);
         ClientSize = new Size(580, 790);
         MinimumSize = new Size(580, 610);
@@ -42,7 +42,7 @@ internal sealed class MainForm : Form
         BackColor = Color.FromArgb(246, 247, 250);
         var body = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28), AutoScroll = true };
         Controls.Add(body);
-        body.Controls.Add(new Label { Text = "Still", Font = new Font("Segoe UI", 28, FontStyle.Bold), AutoSize = true });
+        body.Controls.Add(new Label { Text = "Wallcast", Font = new Font("Segoe UI", 28, FontStyle.Bold), AutoSize = true });
         body.Controls.Add(new Label { Text = "Any screen, as your wallpaper.", AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
         body.Controls.Add(Caption("Input source"));
         mode.Items.AddRange(["Video file", "Capture card / virtual camera"]);
@@ -87,10 +87,11 @@ internal sealed class MainForm : Form
         mode.SelectedIndexChanged += (_, _) => UpdateMode();
         mute.CheckedChanged += (_, _) => playback?.SetMute(mute.Checked);
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Open Still", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
+        menu.Items.Add("Open Wallcast", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
         menu.Items.Add("Stop wallpaper", null, (_, _) => Stop());
         menu.Items.Add("Exit", null, (_, _) => { exiting = true; Close(); });
-        tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "Still · Wallpaper", Visible = true, ContextMenuStrip = menu };
+        Icon = LoadIcon(32);
+        tray = new NotifyIcon { Icon = LoadIcon(16), Text = "Wallcast · Live wallpaper", Visible = true, ContextMenuStrip = menu };
         tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
         Shown += (_, _) =>
         {
@@ -225,6 +226,12 @@ internal sealed class MainForm : Form
         else if (colorSpace.Text == "Rec.2020") colorSpace.SelectedItem = "Rec.709";
     }
     private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text);
+    // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
+    private static Icon LoadIcon(int size)
+    {
+        using var stream = typeof(MainForm).Assembly.GetManifestResourceStream("Wallcast.Wallcast.ico");
+        return stream is null ? SystemIcons.Application : new Icon(stream, new Size(size, size));
+    }
     private static FlowLayoutPanel Row() => new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0, 8, 0, 0) };
     private static Label Caption(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(0, 16, 0, 5) };
     private static Button Button(string text, EventHandler click)
