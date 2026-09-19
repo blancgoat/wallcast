@@ -22,7 +22,20 @@ internal static class Program
                 using var preview = new Bitmap(form.Width, form.Height);
                 form.DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size));
                 preview.Save("artifacts/settings-preview.png", ImageFormat.Png);
-                Console.WriteLine("PASS: Capture settings form rendered");
+                // A greyed grid has to say why, and a disabled control cannot hold a tooltip itself, so
+                // the reason hangs on the grid behind the cells and on the caption beside them.
+                var hidden = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var tips = (ToolTip)typeof(MainForm).GetField("anchorTips", hidden)!.GetValue(form)!;
+                var grid = (Control)typeof(MainForm).GetField("anchorGrid", hidden)!.GetValue(form)!;
+                var caption = (Control?)typeof(MainForm).GetField("anchorCaption", hidden)!.GetValue(form);
+                var cells = (RadioButton[])typeof(MainForm).GetField("anchorCells", hidden)!.GetValue(form)!;
+                var live = cells[0].Enabled;
+                var reason = tips.GetToolTip(grid);
+                if (!tips.ShowAlways) throw new Exception("Tooltips would stay hidden unless the window is active");
+                if (live && reason.Length > 0) throw new Exception("A usable grid should not explain itself away");
+                if (!live && reason.Length < 20) throw new Exception("A greyed grid must say why: " + reason);
+                if (caption is null || tips.GetToolTip(caption).Length < 20) throw new Exception("The caption carries no explanation");
+                Console.WriteLine($"PASS: Capture settings form rendered (anchor grid {(live ? "live" : "greyed: " + reason)})");
                 return 0;
             }
             // Guards the regression this mode was written for: frames can arrive and the control can

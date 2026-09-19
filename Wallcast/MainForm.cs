@@ -30,7 +30,11 @@ internal sealed class MainForm : Form
     private static readonly string[] AnchorGlyphs = ["↖", "↑", "↗", "←", "●", "→", "↙", "↓", "↘"];
     private readonly RadioButton[] anchorCells = new RadioButton[CaptureOptions.Anchors.Length];
     private readonly TableLayoutPanel anchorGrid = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 3, Margin = new Padding(3, 4, 3, 4) };
-    private readonly ToolTip anchorTips = new();
+    // Without ShowAlways a tooltip stays hidden unless the window is active, and a disabled control
+    // never gets the mouse itself, so the reason is hung on the grid and the caption behind it.
+    private readonly ToolTip anchorTips = new() { ShowAlways = true, AutoPopDelay = 15000, InitialDelay = 350 };
+    private bool anchorsActive = true;
+    private Label? anchorCaption;
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
     private readonly NotifyIcon tray;
@@ -83,16 +87,23 @@ internal sealed class MainForm : Form
             {
                 // AutoCheck would hand the selection to whichever cell the form happens to focus first.
                 AutoCheck = false,
-                Appearance = Appearance.Button, Text = AnchorGlyphs[cell], Tag = CaptureOptions.Anchors[cell],
+                // Flat, because the themed button keeps its blue accent even when disabled, which is
+                // exactly the state that has to be unmistakable here.
+                Appearance = Appearance.Button, FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false,
+                Text = AnchorGlyphs[cell], Tag = CaptureOptions.Anchors[cell],
                 Width = 30, Height = 28, Margin = new Padding(1), TextAlign = ContentAlignment.MiddleCenter,
                 Checked = CaptureOptions.Anchors[cell] == "Center"
             };
-            button.Click += (sender, _) => { foreach (var other in anchorCells) other.Checked = ReferenceEquals(other, sender); };
+            button.Click += (sender, _) =>
+            {
+                foreach (var other in anchorCells) other.Checked = ReferenceEquals(other, sender);
+                PaintAnchors();
+            };
             anchorTips.SetToolTip(button, CaptureOptions.Anchors[cell]);
             anchorCells[cell] = button;
             anchorGrid.Controls.Add(button, cell % 3, cell / 3);
         }
-        AddCaptureSetting("Screen position", anchorGrid);
+        anchorCaption = AddCaptureSetting("Screen position", anchorGrid);
         aspect.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         customMode.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         // Room depends on the capture shape and the monitor too, not just on the aspect choice.
@@ -246,11 +257,13 @@ internal sealed class MainForm : Form
         choice.Items.AddRange(values); choice.SelectedIndex = 0;
         return choice;
     }
-    private void AddCaptureSetting(string text, Control control)
+    private Label AddCaptureSetting(string text, Control control)
     {
         var row = captureSettings.RowCount++;
-        captureSettings.Controls.Add(new Label { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 22, 0) }, 0, row);
+        var caption = new Label { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 22, 0) };
+        captureSettings.Controls.Add(caption, 0, row);
         captureSettings.Controls.Add(control, 1, row);
+        return caption;
     }
     // The custom size only means anything for the Custom entry, so it stays out of the way otherwise.
     private void UpdateAspectControls()
@@ -258,14 +271,22 @@ internal sealed class MainForm : Form
         customSize.Enabled = customMode.Enabled = aspect.Text == CaptureOptions.Custom;
         // The anchor can only do something where the picture leaves room on the monitor. A 16:9 capture
         // filling a 16:9 screen leaves none, and a grid that looks live but moves nothing reads as a bug.
-        var room = false;
+        string? blocked = null;
         if (monitors.SelectedIndex >= 0 && monitors.SelectedIndex < screens.Length)
         {
             var monitor = screens[monitors.SelectedIndex].Bounds.Size;
             var placed = SelectedCaptureOptions().Normalize().Fit(monitor);
-            room = placed.Width < monitor.Width || placed.Height < monitor.Height;
+            if (placed.Width >= monitor.Width && placed.Height >= monitor.Height)
+                blocked = aspect.Text == CaptureOptions.Stretch
+                    ? $"Stretch to screen fills the whole {monitor.Width} x {monitor.Height} monitor, so there is nowhere to move the picture."
+                    : $"The picture already covers the whole {monitor.Width} x {monitor.Height} monitor, so there is nowhere to move it. Crop it with Custom size to free up room.";
         }
-        foreach (var cell in anchorCells) cell.Enabled = room;
+        else blocked = "Choose an output monitor first.";
+        anchorsActive = blocked is null;
+        // A disabled control gets no mouse messages, so the reason has to live on the grid behind them.
+        anchorTips.SetToolTip(anchorGrid, blocked ?? string.Empty);
+        if (anchorCaption is not null) anchorTips.SetToolTip(anchorCaption, blocked ?? "Where the picture sits on the monitor.");
+        PaintAnchors();
     }
     private void UpdateHdrControls()
     {
@@ -283,6 +304,22 @@ internal sealed class MainForm : Form
         return stream is null ? SystemIcons.Application : new Icon(stream, new Size(size, size));
     }
     private string SelectedAnchor => anchorCells.FirstOrDefault(cell => cell.Checked)?.Tag as string ?? "Center";
+
+    // Greyed has to read as greyed at a glance, including on the cell that happens to be chosen.
+    private void PaintAnchors()
+    {
+        foreach (var cell in anchorCells)
+        {
+            cell.Enabled = anchorsActive;
+            var chosen = cell.Checked;
+            cell.BackColor = !anchorsActive ? SystemColors.Control
+                : chosen ? Color.FromArgb(0, 103, 192) : SystemColors.Window;
+            cell.ForeColor = !anchorsActive ? SystemColors.GrayText
+                : chosen ? Color.White : SystemColors.ControlText;
+            cell.FlatAppearance.BorderColor = !anchorsActive ? SystemColors.ControlDark
+                : chosen ? Color.FromArgb(0, 78, 145) : SystemColors.ControlDark;
+        }
+    }
     private static FlowLayoutPanel Row() => new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0, 8, 0, 0) };
     private static Label Caption(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(0, 16, 0, 5) };
     private static Button Button(string text, EventHandler click)
