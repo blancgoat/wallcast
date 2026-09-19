@@ -20,8 +20,12 @@ internal sealed class DesktopHost : Form
         get { var p = base.CreateParams; p.ExStyle |= 0x08000080; return p; }
     }
 
-    public void Attach(Screen screen)
+    // The window covers exactly the area the picture will occupy, not the whole monitor. Anything the
+    // window does not cover is still Explorer's own wallpaper, which is how the surround stays the
+    // user's wallpaper instead of a black bar.
+    public void Attach(Screen screen, Rectangle? area = null)
     {
+        var bounds = area ?? screen.Bounds;
         var progman = FindWindow("Progman", null);
         if (progman == IntPtr.Zero) throw new InvalidOperationException("Could not find the Windows desktop.");
         SendMessageTimeout(progman, 0x052C, new IntPtr(0xD), new IntPtr(1), 2, 1000, out _);
@@ -41,9 +45,9 @@ internal sealed class DesktopHost : Form
         SetWindowLongPtr(handle, -16, new IntPtr((style & ~0x80000000L) | 0x40000000L));
         Marshal.SetLastPInvokeError(0);
         if (SetParent(handle, desktop) == IntPtr.Zero && Marshal.GetLastPInvokeError() != 0) throw new Win32Exception();
-        var point = new POINT { X = screen.Bounds.X, Y = screen.Bounds.Y };
+        var point = new POINT { X = bounds.X, Y = bounds.Y };
         MapWindowPoints(IntPtr.Zero, desktop, ref point, 1);
-        if (!SetWindowPos(handle, IntPtr.Zero, point.X, point.Y, screen.Bounds.Width, screen.Bounds.Height, 0x0014)) throw new Win32Exception();
+        if (!SetWindowPos(handle, IntPtr.Zero, point.X, point.Y, bounds.Width, bounds.Height, 0x0014)) throw new Win32Exception();
         Show();
     }
 

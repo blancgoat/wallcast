@@ -11,7 +11,7 @@ A small live wallpaper app for Windows. Point it at a capture card or virtual ca
 3. Pick the output monitor and press **Apply to desktop**.
 4. **Stop** brings your original wallpaper back. The window's X hides to the tray; **Exit** in the tray menu quits for real.
 
-Video keeps its own aspect ratio and loops. If that ratio differs from the screen you get black bars. It is muted by default and can be unmuted. Capture is video only. The capture buffer value sets the DirectShow queue capacity and is not an exact latency figure. That capacity is worked out from the frame size of the format the device emits, so the same value holds the same number of frames as the resolution goes up. The screen always shows the newest frame, presented as soon as it arrives.
+Video keeps its own aspect ratio and loops. It is muted by default and can be unmuted. Capture is video only. The capture buffer value sets the DirectShow queue capacity and is not an exact latency figure. That capacity is worked out from the frame size of the format the device emits, so the same value holds the same number of frames as the resolution goes up. The screen always shows the newest frame, presented as soon as it arrives.
 
 ### Capture settings
 
@@ -21,11 +21,27 @@ Video keeps its own aspect ratio and loops. If that ratio differs from the scree
 | Resolution / FPS | **1920×1080 / 60**, 720p·1440p·4K and others / 59.94·50·30 and others |
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
-| Display aspect | **Input resolution**, 16:9, 4:3, 16:10, Stretch to screen |
+| Display aspect | **Input resolution**, 16:9, 4:3, 16:10, Stretch to screen, Custom size |
+| Custom size / sizing | e.g. `2732x2048` · **Fit to screen**, Actual pixels |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
 For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. Unlike an earlier version, the whole input is no longer force-squeezed to 4:3. Black bars baked into the source are left alone.
+
+**Display aspect** decides the shape of the rectangle the picture is drawn into, centred on the
+monitor. It does not crop and it does not change what the device captures: the whole frame is stretched
+into that rectangle, so picking a shape the source is not will squash it. `Input resolution` means the
+source's own shape, which is the undistorted one; the fixed ratios are there for a source whose reported
+resolution does not match its real shape.
+
+`Custom size` takes a size of your own, such as an iPad's `2732x2048`. `Fit to screen` keeps that shape
+and grows it until it touches an edge of the monitor. `Actual pixels` places it at exactly that many
+pixels, centred, which is what you want when the source resolution and the monitor do not divide evenly
+and you would rather not rescale at all.
+
+Whatever the picture does not cover is **not drawn on**. The app's window is only as large as the
+picture, so the surround is still the wallpaper Windows was already showing - no black bars. Set the
+wallpaper you want around it in Windows itself.
 
 To use an OBS scene or desktop, start OBS's virtual camera and pick that device. A native desktop capture input is not implemented. Capturing your own desktop feeds the picture back into itself, so use another monitor or window as the source.
 
@@ -76,7 +92,7 @@ By hand:
 
 Video uses LibVLCSharp with VideoLAN.LibVLC.Windows.GPL, capture input uses the FFmpeg 9.0.1 Gyan essentials build, and capture output uses Vortice.Direct3D11. `scripts/setup-capture.ps1` pins the version and SHA-256. Keep `capture/LICENSE-FFmpeg.txt` and `capture/README-FFmpeg.txt` in place.
 
-Desktop output check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --desktop "Live Gamer BOLT"`. It opens the device, attaches it to the desktop, briefly minimises open windows, grabs the real screen and compares it against the frames it received. `--resolution` and `--aspect` set the resolution and display aspect (`--aspect 4:3` also checks the black bars), and it reports frames received and frames on screen separately. The grab is saved to `artifacts/desktop-capture.png`. It minimises and restores windows, so it is not part of the automatic run. It exists because receiving frames does not prove anything reached the screen.
+Desktop output check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --desktop "Live Gamer BOLT"`. It opens the device, attaches it to the desktop, briefly minimises open windows, grabs the real screen and compares it against the frames it received. `--resolution` and `--aspect` set the resolution and display aspect, `--custom 2732x2048` (with `--actual` for exact pixels) sets a custom one, and it reports frames received and frames on screen separately. Whenever the picture does not fill the monitor it also checks the surround still matches the bare desktop, and says how many of those samples were not black to begin with, since a black wallpaper cannot tell a working surround from a black bar. The grab is saved to `artifacts/desktop-capture.png`. It minimises and restores windows, so it is not part of the automatic run. It exists because receiving frames does not prove anything reached the screen.
 
 That check excludes the area of any window that refused to minimise, and reports SKIP rather than a failure when less than 20% of the wallpaper was uncovered. With a moving source the moment of the screen grab and the moment a frame arrives do not line up, so it compares against the best of several frames taken either side of the grab. Without both of those a perfectly good renderer looks broken.
 

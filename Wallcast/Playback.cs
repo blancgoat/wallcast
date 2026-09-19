@@ -38,10 +38,13 @@ internal sealed class Playback : IDisposable
         {
             source = input;
             host = new DesktopHost();
-            host.Attach(screen);
             if (input is CaptureSource device)
             {
                 var options = (device.Options ?? new CaptureOptions()).Normalize();
+                // Cover only the picture. The surround is left alone, so the wallpaper shows there.
+                var area = options.Fit(screen.Bounds.Size);
+                area.Offset(screen.Bounds.Location);
+                host.Attach(screen, area);
                 capture = new CapturePlayback(device.Device, device.CacheMilliseconds, options);
                 capture.Started += () => Post(current, () => Status?.Invoke($"Playing · {options.Format} / {options.ColorSpace} / {options.DynamicRange} / {options.Resolution} / {options.Fps}fps"));
                 capture.Failed += detail => Post(current, () => { Stop(); Status?.Invoke(detail); });
@@ -51,6 +54,7 @@ internal sealed class Playback : IDisposable
                 capture.Start();
                 return;
             }
+            host.Attach(screen);
             player = new MediaPlayer(engine) { Hwnd = host.Handle, Mute = mute };
             player.EnableKeyInput = false;
             player.EnableMouseInput = false;

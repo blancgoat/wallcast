@@ -7,17 +7,16 @@ namespace Wallcast;
 
 // Explorer's desktop window has no GDI redirection surface, so anything painted into it with GDI is
 // never composited. Frames reach the screen only through a DXGI flip-model swap chain, which is the
-// same path LibVLC uses for video. One chain fills the letterbox with black, one carries the frames.
+// same path LibVLC uses for video. Only the picture's own rectangle carries a swap chain, so whatever
+// the screen is not covered by it stays the wallpaper the user already had.
 internal sealed class CaptureSurface : Control
 {
     private readonly CapturePlayback capture;
-    private readonly Layer video = new();
     private readonly Size frame;
     private int queued;
     private bool stopped;
     private ID3D11Device? device;
     private ID3D11DeviceContext? context;
-    private IDXGISwapChain1? backdrop;
     private IDXGISwapChain1? stream;
     private ID3D11Texture2D? upload;
     private long presented;
@@ -31,16 +30,10 @@ internal sealed class CaptureSurface : Control
         frame = capture.Options.FrameSize;
         SetStyle(ControlStyles.Opaque | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
         Dock = DockStyle.Fill;
-        BackColor = Color.Black;
-        Controls.Add(video);
         capture.FrameReady += OnFrameReady;
     }
 
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        Arrange();
-    }
+    protected override void OnHandleCreated(EventArgs e) => base.OnHandleCreated(e);
 
     // Presenting the moment a frame lands beats polling on a timer, whose ~15ms resolution adds that
     // much latency to every frame. One draw in flight is enough: the capture keeps only the newest.
@@ -58,15 +51,8 @@ internal sealed class CaptureSurface : Control
         }
     }
 
-    protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); Arrange(); }
     protected override void OnPaintBackground(PaintEventArgs e) { }
     protected override void OnPaint(PaintEventArgs e) { }
-    private void Arrange()
-    {
-        if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
-        video.Bounds = capture.Options.Fit(ClientSize);
-        if (backdrop is not null) Fill(backdrop, Black);
-    }
 
     private void CreateResources()
     {
@@ -78,16 +64,13 @@ internal sealed class CaptureSurface : Control
         using var dxgi = device.QueryInterface<IDXGIDevice>();
         using var adapter = dxgi.GetAdapter();
         using var factory = adapter.GetParent<IDXGIFactory2>();
-        // A 1x1 chain is enough for the bars: the swap chain is stretched to the whole control.
-        backdrop = factory.CreateSwapChainForHwnd(device, Handle, Describe(1, 1));
-        stream = factory.CreateSwapChainForHwnd(device, video.Handle, Describe((uint)frame.Width, (uint)frame.Height));
+        stream = factory.CreateSwapChainForHwnd(device, Handle, Describe((uint)frame.Width, (uint)frame.Height));
         upload = device.CreateTexture2D(new Texture2DDescription
         {
             Width = (uint)frame.Width, Height = (uint)frame.Height, MipLevels = 1, ArraySize = 1,
             Format = Format.B8G8R8A8_UNorm, SampleDescription = new SampleDescription(1, 0),
             Usage = ResourceUsage.Dynamic, BindFlags = BindFlags.ShaderResource, CPUAccessFlags = CpuAccessFlags.Write
         });
-        Fill(backdrop, Black);
     }
 
     private static SwapChainDescription1 Describe(uint width, uint height) => new()
@@ -98,21 +81,12 @@ internal sealed class CaptureSurface : Control
         AlphaMode = AlphaMode.Ignore, SampleDescription = new SampleDescription(1, 0)
     };
 
-    private static readonly Vortice.Mathematics.Color4 Black = new(0f, 0f, 0f, 1f);
-    private void Fill(IDXGISwapChain1 chain, Vortice.Mathematics.Color4 colour)
-    {
-        using var back = chain.GetBuffer<ID3D11Texture2D>(0);
-        using var view = device!.CreateRenderTargetView(back);
-        context!.ClearRenderTargetView(view, colour);
-        chain.Present(0, PresentFlags.None);
-    }
-
     // The swap chains are bound to their windows, so they are built only once the layout has given
     // those windows their real size; a chain created for a zero-sized window never composites.
     private bool Ready()
     {
         if (device is not null) return true;
-        if (ClientSize.Width <= 0 || ClientSize.Height <= 0 || video.Width <= 0 || video.Height <= 0) return false;
+        if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return false;
         try { CreateResources(); return true; }
         catch (Exception ex)
         {
@@ -166,7 +140,6 @@ internal sealed class CaptureSurface : Control
         Stop();
         upload?.Dispose(); upload = null;
         stream?.Dispose(); stream = null;
-        backdrop?.Dispose(); backdrop = null;
         context?.Dispose(); context = null;
         device?.Dispose(); device = null;
     }
@@ -175,13 +148,5 @@ internal sealed class CaptureSurface : Control
     {
         if (disposing) Release();
         base.Dispose(disposing);
-    }
-
-    // The swap chain owns these pixels; letting WinForms paint over them only wastes time.
-    private sealed class Layer : Control
-    {
-        public Layer() => SetStyle(ControlStyles.Opaque | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
-        protected override void OnPaintBackground(PaintEventArgs e) { }
-        protected override void OnPaint(PaintEventArgs e) { }
     }
 }

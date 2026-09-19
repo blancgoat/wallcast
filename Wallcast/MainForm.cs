@@ -24,6 +24,8 @@ internal sealed class MainForm : Form
     private readonly ComboBox colorSpace = Choice(CaptureOptions.ColorSpaces);
     private readonly ComboBox colorRange = Choice(CaptureOptions.ColorRanges);
     private readonly ComboBox aspect = Choice(CaptureOptions.Aspects);
+    private readonly TextBox customSize = new() { Width = 325, Margin = new Padding(3, 4, 3, 4), PlaceholderText = "2732x2048" };
+    private readonly ComboBox customScale = Choice(CaptureOptions.CustomScales);
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
     private readonly NotifyIcon tray;
@@ -68,6 +70,10 @@ internal sealed class MainForm : Form
         AddCaptureSetting("Input HDR", dynamicRange);
         AddCaptureSetting("HDR peak (nits)", hdrPeak);
         AddCaptureSetting("Display aspect", aspect);
+        AddCaptureSetting("Custom size (W x H)", customSize);
+        AddCaptureSetting("Custom sizing", customScale);
+        aspect.SelectedIndexChanged += (_, _) => UpdateAspectControls();
+        UpdateAspectControls();
         dynamicRange.SelectedIndexChanged += (_, _) => UpdateHdrControls();
         UpdateHdrControls();
         body.Controls.Add(captureSettings);
@@ -220,6 +226,12 @@ internal sealed class MainForm : Form
         captureSettings.Controls.Add(new Label { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 22, 0) }, 0, row);
         captureSettings.Controls.Add(control, 1, row);
     }
+    // The custom size only means anything for the Custom entry, so it stays out of the way otherwise.
+    private void UpdateAspectControls()
+    {
+        var custom = aspect.Text == CaptureOptions.Aspects[5];
+        customSize.Enabled = customScale.Enabled = custom;
+    }
     private void UpdateHdrControls()
     {
         var hdr = dynamicRange.SelectedIndex > 0;
@@ -228,7 +240,7 @@ internal sealed class MainForm : Form
         if (hdr) colorSpace.SelectedItem = "Rec.2020";
         else if (colorSpace.Text == "Rec.2020") colorSpace.SelectedItem = "Rec.709";
     }
-    private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text);
+    private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customScale.Text);
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)
     {
@@ -271,6 +283,8 @@ internal sealed class MainForm : Form
             fps.SelectedItem = options.Fps; colorSpace.SelectedItem = options.ColorSpace;
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
+            customSize.Text = options.CustomSize; customScale.SelectedItem = options.CustomScale;
+            UpdateAspectControls();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { status.Text = "Could not read saved settings, started with defaults."; }
     }

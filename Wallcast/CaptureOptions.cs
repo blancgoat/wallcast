@@ -6,14 +6,17 @@ namespace Wallcast;
 internal sealed record CaptureOptions(
     string Format = "NV12", string Resolution = "1920x1080", string Fps = "60",
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
-    string DynamicRange = "SDR", string HdrPeak = "1000")
+    string DynamicRange = "SDR", string HdrPeak = "1000",
+    string CustomSize = "1920x1080", string CustomScale = "Fit to screen")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
     public static readonly string[] FrameRates = ["60", "59.94", "50", "30", "29.97", "25", "24"];
     public static readonly string[] ColorSpaces = ["Rec.709", "Rec.601", "Rec.2020"];
     public static readonly string[] ColorRanges = ["Limited", "Full"];
-    public static readonly string[] Aspects = ["Input resolution", "16:9", "4:3", "16:10", "Stretch to screen"];
+    public static readonly string[] Aspects = ["Input resolution", "16:9", "4:3", "16:10", "Stretch to screen", "Custom size"];
+    // Fit keeps the custom shape but grows it to the screen; Actual pixels places it at its own size.
+    public static readonly string[] CustomScales = ["Fit to screen", "Actual pixels"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
 
@@ -25,7 +28,19 @@ internal sealed record CaptureOptions(
         ColorRanges.Contains(ColorRange) ? ColorRange : ColorRanges[0],
         Aspects.Contains(Aspect) ? Aspect : Aspects[0],
         DynamicRanges.Contains(DynamicRange) ? DynamicRange : DynamicRanges[0],
-        HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000");
+        HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
+        Measure(CustomSize) is { } size ? $"{size.Width}x{size.Height}" : "1920x1080",
+        CustomScales.Contains(CustomScale) ? CustomScale : CustomScales[0]);
+
+    // Accepts 1920x1080 and 1920 x 1080 alike, and rejects anything that is not a usable frame.
+    public static Size? Measure(string value)
+    {
+        var parts = (value ?? "").Split('x', 'X', '*', '×');
+        if (parts.Length != 2) return null;
+        if (!int.TryParse(parts[0].Trim(), out var width) || !int.TryParse(parts[1].Trim(), out var height)) return null;
+        if (width < 16 || height < 16 || width > 16384 || height > 16384) return null;
+        return new Size(width, height);
+    }
     // Derived, so it is not part of the saved settings.
     [System.Text.Json.Serialization.JsonIgnore]
     public Size FrameSize
@@ -84,12 +99,25 @@ internal sealed record CaptureOptions(
         return info;
     }
 
+    // Where on the monitor the picture goes. Whatever this leaves over is not covered at all, so the
+    // user's own wallpaper shows there.
     public Rectangle Fit(Size target)
     {
         if (Aspect == Aspects[4]) return new Rectangle(Point.Empty, target);
-        double ratio = Aspect switch { "16:9" => 16d / 9, "4:3" => 4d / 3, "16:10" => 1.6, _ => (double)FrameSize.Width / FrameSize.Height };
-        var width = Math.Min(target.Width, (int)Math.Round(target.Height * ratio));
-        var height = Math.Min(target.Height, (int)Math.Round(target.Width / ratio));
-        return new Rectangle((target.Width - width) / 2, (target.Height - height) / 2, width, height);
+        if (Aspect == Aspects[5])
+        {
+            var custom = Measure(CustomSize) ?? new Size(1920, 1080);
+            if (CustomScale == CustomScales[1])
+                return Centre(target, Math.Min(target.Width, custom.Width), Math.Min(target.Height, custom.Height));
+            return Largest(target, (double)custom.Width / custom.Height);
+        }
+        return Largest(target, Aspect switch { "16:9" => 16d / 9, "4:3" => 4d / 3, "16:10" => 1.6, _ => (double)FrameSize.Width / FrameSize.Height });
     }
+
+    private static Rectangle Largest(Size target, double ratio) => Centre(target,
+        Math.Min(target.Width, (int)Math.Round(target.Height * ratio)),
+        Math.Min(target.Height, (int)Math.Round(target.Width / ratio)));
+
+    private static Rectangle Centre(Size target, int width, int height) =>
+        new((target.Width - width) / 2, (target.Height - height) / 2, width, height);
 }

@@ -32,13 +32,20 @@ internal static class Program
             {
                 Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
                 Application.EnableVisualStyles();
+                Bitmap? baseline = null;
                 var name = args.SkipWhile(a => a != "--desktop").Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? CaptureDevices.Enumerate()[0];
                 var chosen = args.SkipWhile(a => a != "--aspect").Skip(1).FirstOrDefault();
                 var res = args.SkipWhile(a => a != "--resolution").Skip(1).FirstOrDefault();
+                var custom = args.SkipWhile(a => a != "--custom").Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+                var scale = args.Contains("--actual") ? CaptureOptions.CustomScales[1] : CaptureOptions.CustomScales[0];
                 var settings = new CaptureOptions(Resolution: res ?? CaptureOptions.Resolutions[0],
-                    Aspect: chosen ?? CaptureOptions.Aspects[0]).Normalize();
+                    Aspect: custom is null ? chosen ?? CaptureOptions.Aspects[0] : CaptureOptions.Aspects[5],
+                    CustomSize: custom ?? "1920x1080", CustomScale: scale).Normalize();
+                Console.WriteLine($"AREA: aspect={settings.Aspect} custom={settings.CustomSize}/{settings.CustomScale} -> {settings.Fit(Screen.PrimaryScreen!.Bounds.Size)}");
+                var area = settings.Fit(Screen.PrimaryScreen!.Bounds.Size);
+                area.Offset(Screen.PrimaryScreen!.Bounds.Location);
                 var host = new DesktopHost();
-                host.Attach(Screen.PrimaryScreen!);
+                host.Attach(Screen.PrimaryScreen!, area);
                 var capture = new CapturePlayback(name, 150, settings);
                 string? trouble = null;
                 capture.Failed += message => trouble ??= message;
@@ -74,6 +81,7 @@ internal static class Program
                         shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
                         shell!.GetType().InvokeMember("MinimizeAll", System.Reflection.BindingFlags.InvokeMethod, null, shell, null);
                         for (var i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(50); }
+                        baseline = Baseline(host);
                         var bounds = Screen.PrimaryScreen!.Bounds;
                         var fitted = settings.Fit(bounds.Size);
                         // A moving source moves on while the screen is being grabbed, so the frame that
@@ -82,6 +90,8 @@ internal static class Program
                         // Windows that refuse to minimise would otherwise read as a broken renderer, so
                         // only the points where our own wallpaper window is on top are compared.
                         var visible = MaskWallpaper(fitted);
+                        var covers = CoveringWindows();
+                        bool visibleAt(int x, int y) => !covers.Any(cover => cover.Contains(x, y));
                         using var screen = new Bitmap(bounds.Width, bounds.Height);
                         using (var g = Graphics.FromImage(screen)) g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
                         references.AddRange(Collect(capture, settings.FrameSize, 3));
@@ -92,11 +102,24 @@ internal static class Program
                         var shown = SampleScreen(screen, fitted);
                         var matched = references.Max(reference => Matches(shown, reference, visible));
                         Console.WriteLine($"RESULT: {matched}/{sampled} uncovered desktop pixels match the captured frame (best of {references.Count})");
-                        if (fitted.X > 8)
+                        // The surround must still be the wallpaper the user had, not a black bar. A
+                        // wallpaper that is itself black there would match either way, so the count of
+                        // non-black baseline samples says whether this run could tell the difference.
+                        if (baseline is not null && (fitted.Width < bounds.Width || fitted.Height < bounds.Height))
                         {
-                            var bar = screen.GetPixel(fitted.X / 2, bounds.Height / 2);
-                            Console.WriteLine($"LETTERBOX: bar pixel {bar.R},{bar.G},{bar.B}");
-                            if (bar.R + bar.G + bar.B > 30) { Console.WriteLine("FAIL: letterbox is not black"); return; }
+                            int same = 0, total = 0, telling = 0;
+                            for (var y = 4; y < bounds.Height - 4; y += 37)
+                                for (var x = 4; x < bounds.Width - 4; x += 37)
+                                {
+                                    if (fitted.Contains(x, y) || !visibleAt(x, y)) continue;
+                                    var was = baseline.GetPixel(x, y);
+                                    var now = screen.GetPixel(x, y);
+                                    total++;
+                                    if (was.R + was.G + was.B > 40) telling++;
+                                    if (Math.Abs(was.R - now.R) + Math.Abs(was.G - now.G) + Math.Abs(was.B - now.B) <= 30) same++;
+                                }
+                            Console.WriteLine($"SURROUND: {same}/{total} match the bare desktop ({telling} of them not black to begin with)");
+                            if (total > 0 && same * 10 < total * 9) { Console.WriteLine("FAIL: the surround no longer shows the original wallpaper"); return; }
                         }
                         if (matched * 10 < sampled * 9) { Console.WriteLine("FAIL: the desktop does not show the capture"); return; }
                         Console.WriteLine("PASS: capture is live on the desktop (artifacts/desktop-capture.png)");
@@ -238,7 +261,7 @@ internal static class Program
     // WindowFromPoint cannot find our wallpaper window, because Explorer's WorkerW above it is disabled
     // and that call skips disabled windows. So the covered area is worked out from every ordinary
     // window still standing on the desktop instead.
-    private static bool[] MaskWallpaper(Rectangle target)
+    private static List<Rectangle> CoveringWindows()
     {
         var covers = new List<Rectangle>();
         var name = new System.Text.StringBuilder(64);
@@ -252,6 +275,12 @@ internal static class Program
                 covers.Add(Rectangle.FromLTRB(box.Left, box.Top, box.Right, box.Bottom));
             return true;
         }, IntPtr.Zero);
+        return covers;
+    }
+
+    private static bool[] MaskWallpaper(Rectangle target)
+    {
+        var covers = CoveringWindows();
         var mask = new bool[(Grid - First) * (Grid - First)];
         var at = 0;
         for (var y = First; y < Grid; y++)
@@ -330,5 +359,18 @@ internal static class Program
             if (drift <= 60) matched++;
         }
         return matched;
+    }
+
+    // What the desktop looks like with our window hidden, so the surround can be compared against it.
+    private static Bitmap Baseline(DesktopHost host)
+    {
+        host.Visible = false;
+        for (var i = 0; i < 10; i++) { Application.DoEvents(); Thread.Sleep(40); }
+        var bounds = Screen.PrimaryScreen!.Bounds;
+        var shot = new Bitmap(bounds.Width, bounds.Height);
+        using (var g = Graphics.FromImage(shot)) g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
+        host.Visible = true;
+        for (var i = 0; i < 10; i++) { Application.DoEvents(); Thread.Sleep(40); }
+        return shot;
     }
 }
