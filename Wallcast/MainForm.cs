@@ -309,11 +309,13 @@ internal sealed class MainForm : Form
                 ? Wrap("Whether the video file is heard. It takes effect where it stands, without applying again.")
             : string.Join(Environment.NewLine,
                 "Off — the device is asked for no sound at all. Nothing is captured and nothing is spent.",
-                "On — the sound the device is sending when you press Apply, left as it is.",
-                "On, following the source — re-opens the sound when the source changes its sample",
-                "    rate, within about four seconds. Costs under half a percent of a core.",
+                "On — the sound the device is sending when you press Apply. It re-opens itself if the",
+                "    sound starts arriving at a rate that plainly disagrees, which costs nothing to",
+                "    notice; a card that quietly resamples instead hides that, and this will not catch it.",
+                "On, following the source — also asks the device what it is receiving, which catches the",
+                "    hidden case too, within about four seconds. Under half a percent of a core.",
                 "On, following closely — the same within about a second, for a source that changes",
-                "    rate track by track. Costs under two percent.",
+                "    rate track by track. Under two percent.",
                 "",
                 "Re-opening freezes the picture for about a second and a half; it does not go black.",
                 "Takes effect on Apply, like every other capture setting.");

@@ -171,9 +171,10 @@ internal sealed class Playback : IDisposable
         var opened = driftAt;
         drift = new System.Threading.Timer(_ => Post(current, () => CheckDrift(current, screen, opened)), null, 1000, 1000);
         disagreed = 0;
-        // On the UI thread on purpose: the answer takes about eight milliseconds and the objects it
-        // touches belong to this apartment. Two seconds apart, and only while there is sound to keep
-        // right - a muted capture has nothing to follow.
+        // Counting what arrives costs nothing and is therefore done whenever there is sound at all.
+        // Asking the device costs about eight milliseconds an ask, so that is the part the setting
+        // buys: it is the only one that sees a card quietly resampling to the rate its pin was opened
+        // at, where the bytes go on adding up correctly while the sound itself is a mess.
         if (deaf || !options.Following) return;
         var watch = options.Watch;
         listen = new System.Threading.Timer(_ => Post(current, () => CheckOffered(current, screen, watch.Before)), null, watch.Every, watch.Every);

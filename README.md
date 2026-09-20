@@ -38,9 +38,11 @@ Everything starts silent. **Sound** is one setting, because muting an input whil
 device how its sound is doing was two knobs describing one intention:
 
 - `Off` asks the device for no sound at all. Nothing is captured, nothing is watched, nothing is spent.
-- `On` takes the sound the device is sending when you press Apply and leaves it there.
-- `On, following the source` re-opens the sound when the source changes its sample rate, settling
-  within four seconds.
+- `On` takes the sound the device is sending when you press Apply. It still re-opens itself when the
+  sound starts arriving at a rate that plainly disagrees with what the pin claims, because counting
+  what arrives costs nothing; it does not catch a card that quietly resamples instead.
+- `On, following the source` also asks the device what it is receiving, which is the only way to see
+  that hidden case, settling within four seconds.
 - `On, following closely` does the same within one second, for a source that changes rate track by
   track.
 
@@ -94,14 +96,18 @@ would make it a hundred times cheaper and was tried; it does not work, because a
 format list when the filter is built and a kept one goes on answering about the signal that was arriving
 when it was kept - it updates eventually, hours apart, which is worse than not updating at all.
 
-Two things say that the source has changed. What arrives per second stops matching the rate the pin
-claims, which catches a card that keeps sending its old rate under the new label and is free to notice
-because the bytes are already in hand. And the device's own format list, which it reorders to put what
-it is receiving first and will answer while it is being captured - about eight milliseconds, asked
-every two seconds, in this process and with nothing launched. That second one is what does the work:
-a card that resamples to the rate its pin was opened at sends exactly as many bytes a second as it
-should while making a mess of the sound, so only the device knows. A device that will not answer is
-not asked again, and its sound then simply keeps whatever it negotiated when playback started.
+Two things say that the source has changed, and they are what the settings above are choosing between.
+
+What arrives per second stops matching the rate the pin claims. That catches a source dropping below
+the rate the pin was opened at, where the card does not resample upwards and simply sends fewer samples
+under the old label - 8.8% slow, between 44.1kHz and 48kHz. The bytes are already in hand, so this is
+free, and it runs whenever there is sound at all.
+
+The device's own format list, which it reorders to put what it is receiving first and will answer while
+it is being captured. This is the one the following settings add, and it is the only one that sees the
+other half of the problem: a card that resamples to the rate its pin was opened at sends exactly as
+many bytes a second as it should while making a mess of the sound, so nothing about the bytes gives it
+away. A device that will not answer is not asked again.
 
 Measured on a Live Gamer BOLT across 44.1kHz, 48kHz and 96kHz sources: three changes, three re-opens,
 1.6s, 1.5s and 1.7s of frozen picture, no false alarm in between. A 96kHz source needs no re-open when
