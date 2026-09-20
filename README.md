@@ -197,7 +197,7 @@ With the project-local SDK, use `.\.tools\dotnet\dotnet.exe` instead of `dotnet`
 ```
 
 That publishes into an empty `artifacts/Wallcast` and archives it as
-`artifacts/Wallcast-v1.1.0-win-x64.zip`, about 164 MB, which is the single file to upload. The version
+`artifacts/Wallcast-v1.2.0-win-x64.zip`, about 164 MB, which is the single file to upload. The version
 in the name is read out of the binary that was just built, so the two can never disagree; name, then
 version, then platform, the order Node and PowerShell use for their own downloads. It unpacks to one
 `Wallcast` folder that runs from anywhere - no installer and nothing to install alongside it. The script refuses to package a build that
@@ -211,7 +211,7 @@ macOS and Linux turns into one long filename per file.
 The version lives in one place, `<Version>` in `Wallcast/Wallcast.csproj`. It reaches the title bar, the
 tray tooltip and the file properties of the exe, and the build appends the commit it came from, so a
 screenshot of the title bar is enough to know exactly which build someone is running. Tag a release to
-match: `git tag -a v1.1.0 -m "Wallcast v1.1.0"`.
+match: `git tag -a v1.2.0 -m "Wallcast v1.2.0"`.
 
 Because FFmpeg and LibVLC are GPL, so is anything you hand out that contains them. `LICENSE` and
 `THIRD-PARTY.txt` are published into the folder for that reason - the latter lists every component, its
@@ -275,20 +275,30 @@ Sound following check: `dotnet run --project SmokeTests -c Release -r win-x64 --
 
 Sound path check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --sound "Live Gamer BOLT"`. This one drives the app's own playback: it puts the device on the desktop with sound and times the stop. The timing is the point. The player reads the engine's stdout, and a read there only returns once there is data or the writer is gone, so stopping in the wrong order would park the UI thread on a read nothing is going to answer. It ends the engine first, and the stop is expected to take well under a second.
 
-2026-09-20, capture sound. The Mute checkbox works for capture as well as video, and a capture device
-hands over the sound it sends alongside the picture. Both are muted to begin with. It travels as WAV on
-the engine's stdout, which the picture could never use - it stalls near 800 MB/s - but stereo PCM is a
-thousandth of that traffic. Measured: 1593 KB decoded over 9.25s, which is 44.1kHz stereo at real time
-exactly, with no effect on the frame rate. Two things were settled by measurement rather than
-assumption: a capture card will not hand its sound over as a device of its own, so it has to be asked
-for on the same input as the picture, and OBS's virtual camera has no sound at all - it registers no
-audio device to go with the camera - so the checkbox greys out and says so.
+2026-09-20, 1.2.0, sound. A capture device's sound reaches the desktop alongside its picture, and
+nothing uses sound until you say so. It travels as WAV on the engine's stdout, which the picture could
+never use - that stalls near 800 MB/s - but stereo PCM is a thousandth of the traffic. Measured: 1593 KB
+decoded over 9.25s, 44.1kHz stereo at real time exactly, with no effect on the frame rate.
 
-Two channels are asked for and the rate deliberately is not, so the device's own current format is the
-one used - confirmed both ways on a Live Gamer BOLT, 44100 for a 44.1kHz source and 48000 for a 96kHz
-one it converts down. Asking for a rate without a channel count had let the engine pick the pin's eight
-channel layout instead. Forcing a rate the device is not sending plays 8.8% fast rather than failing,
-measured, and is left uncorrected: only the device knows what it is sending.
+Three things were settled by measurement rather than assumption. A capture card will not hand its sound
+over as a device of its own, so it has to be asked for on the same input as the picture. OBS's virtual
+camera has none at all and registers no audio device to go with itself, so the setting greys out and
+says why. And asking for a rate without a channel count lets the engine take the pin's eight channel
+layout, which is most of what wrong-sounding capture audio turns out to be; the rate itself is left to
+the device, which answers with whatever it is receiving.
+
+A source that changes rate between tracks is followed, which is what the checkbox under the sound
+setting is for. The pin keeps the rate it opened with, so following means re-opening the engine: the
+picture freezes on its last frame for about a second and a half rather than going black. Measured
+across 44.1kHz, 48kHz and 96kHz sources: three changes, three re-opens, 1.6s, 1.5s and 1.7s, and no
+false alarm in between. Holding the DirectShow filter between asks would make each one a hundred times
+cheaper and was tried; a driver settles its format list when the filter is built, so a kept one goes on
+answering about the signal it was built on.
+
+The window got out of its own way as well. It scrolls as far as its own last control, which it did not
+before - it stopped 168 pixels short of the status line. The wheel over a setting moves the window
+instead of silently changing a resolution on the way past. And the name at the top of it went away,
+since the title bar was already carrying it.
 
 2026-09-20, 1.1.0, video parity. The video path caught up with capture. It takes the same output resolution,
 mapping and screen position, placed by the same arithmetic against the shape the file turns out to be,
