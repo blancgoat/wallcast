@@ -207,6 +207,7 @@ internal sealed class MainForm : Form
             }
         };
         UpdateMode();
+        LeaveTheWheelAlone(body);
         ScaleGeometry(this, DeviceDpi / 96f);
         ResumeLayout(true);
     }
@@ -214,6 +215,32 @@ internal sealed class MainForm : Form
     // A FlowLayoutPanel settles how far it scrolls before its AutoSize children have finished
     // growing, so the last of them can sit below the bottom of a panel that believes it has nothing
     // left to show. Measuring the children and saying so outright is what makes the bottom reachable.
+    // A combo box under the cursor takes the wheel whether or not it is focused, and the panel behind
+    // it never sees it. That is how Windows has always done it, and in a short dialog it is harmless.
+    // Here the window is long enough to need scrolling and there are nine settings stacked down it, so
+    // a scroll that crosses one changes a resolution or a pixel format on the way past - silently, and
+    // invisibly too, because capture settings only take hold on Apply. Browsers gave this up for the
+    // same reason. The wheel scrolls the window; to change a setting, open it.
+    private void LeaveTheWheelAlone(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            if (child is ComboBox or NumericUpDown) child.MouseWheel += ScrollInstead;
+            LeaveTheWheelAlone(child);
+        }
+    }
+
+    private void ScrollInstead(object? sender, MouseEventArgs e)
+    {
+        // An open dropdown is a list of its own and the wheel belongs to it.
+        if (sender is ComboBox { DroppedDown: true }) return;
+        if (e is HandledMouseEventArgs stoppable) stoppable.Handled = true;
+        if (!scroller.VerticalScroll.Visible) return;
+        var reach = scroller.VerticalScroll.Maximum - scroller.ClientSize.Height;
+        var moved = -scroller.AutoScrollPosition.Y - e.Delta;
+        scroller.AutoScrollPosition = new Point(0, Math.Clamp(moved, 0, Math.Max(0, reach)));
+    }
+
     // Build every row at the same DPI, including rows initially hidden by the source selector.
     private static void ScaleGeometry(Control control, float factor)
     {

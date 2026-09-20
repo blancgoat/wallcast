@@ -72,6 +72,21 @@ internal static class Program
                 if (!silence.Enabled) throw new Exception("A video file always has sound to use or not");
                 if (Field("trackRow").Visible) throw new Exception("A video file was offered tracking, which only a device needs");
                 chooser.SelectedIndex = 0;
+                Application.DoEvents();
+                // The wheel over a setting should move the window, not the setting. What can be checked
+                // from here is that it scrolls; that it no longer reaches the native selection change
+                // needs real input at the window to prove, which would take the mouse away from whoever
+                // is running this.
+                var probe = (ComboBox)Field("resolution");
+                var was = probe.SelectedIndex;
+                var stood = -scroller.AutoScrollPosition.Y;
+                typeof(Control).GetMethod("OnMouseWheel", hidden)!.Invoke(probe,
+                    [new HandledMouseEventArgs(MouseButtons.None, 0, 0, 0, -120, false)]);
+                Application.DoEvents();
+                Console.WriteLine($"WHEEL: over a setting, selection {was} -> {probe.SelectedIndex}, window {stood} -> {-scroller.AutoScrollPosition.Y}");
+                if (probe.SelectedIndex != was) throw new Exception("The wheel changed a setting instead of scrolling");
+                if (scroller.VerticalScroll.Visible && -scroller.AutoScrollPosition.Y == stood)
+                    throw new Exception("The wheel over a setting did not scroll the window");
                 var box = (ComboBox)Field("devices");
                 foreach (string device in box.Items)
                 {
