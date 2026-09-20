@@ -14,64 +14,110 @@ namespace Wallcast;
 //
 // Everything here is best effort. A device that will not answer leaves the caller with an empty list,
 // and the caller then settles for whatever was negotiated when playback started.
-internal static class SoundFormats
+internal sealed class SoundFormats : IDisposable
 {
     private static readonly Guid AudioMedia = new("73647561-0000-0010-8000-00aa00389b71");
     private static readonly Guid WaveFormat = new("05589f81-c356-11ce-bf01-00aa0055595a");
     private static readonly Guid VideoCategory = new("860bb310-5d01-11d0-bd3b-00a0c911ce86");
     private static readonly Guid AudioCategory = new("33d9a762-90c8-11d0-bd43-00a0c9118956");
 
-    // The rates the pin offers for stereo, in the device's own order. The head of that list is what it
-    // is receiving now, which is the whole point of asking.
+    private readonly string device;
+    private object? filter;
+    private IAMStreamConfig? config;
+    private IntPtr scratch;
+    private int capabilities;
+    private bool hopeless;
+
+    // Finding the pin means enumerating every capture device and building a filter, which is most of
+    // the eight milliseconds the first ask costs. Asked again every fraction of a second, that would
+    // be waste: the pin itself is what changes its answer, not which pin it is, so it is kept.
+    public SoundFormats(string device) => this.device = device;
+
+    // One ask, for a caller that has no reason to hold anything.
     public static List<int> Rates(string device)
     {
+        using var once = new SoundFormats(device);
+        return once.Offered();
+    }
+
+    // The rates the pin offers for stereo, in the device's own order. The head of that list is what it
+    // is receiving now, which is the whole point of asking.
+    public List<int> Offered()
+    {
         var rates = new List<int>();
+        if (hopeless) return rates;
+        try
+        {
+            if (config is null) Find();
+            if (config is null) { hopeless = true; return rates; }
+            for (var i = 0; i < capabilities; i++) Read(config, i, scratch, rates);
+        }
+        catch (COMException) { Forget(); }
+        catch (InvalidCastException) { Forget(); }
+        return rates;
+    }
+
+    // A device that is unplugged and plugged back in is a different filter, so a failed ask throws the
+    // cached one away rather than answering wrongly for the rest of the session.
+    private void Forget()
+    {
+        if (scratch != IntPtr.Zero) { Marshal.FreeCoTaskMem(scratch); scratch = IntPtr.Zero; }
+        if (config is not null) { Marshal.ReleaseComObject(config); config = null; }
+        if (filter is not null) { Marshal.ReleaseComObject(filter); filter = null; }
+        capabilities = 0;
+    }
+
+    private void Find()
+    {
         // A card carries its sound on a pin of the video device, so that category comes first; a plain
         // audio device is only reached through the other one.
         foreach (var category in new[] { VideoCategory, AudioCategory })
         {
-            var filter = Bind(device, category);
+            filter = Bind(device, category);
             if (filter is null) continue;
-            try { Collect(filter, rates); }
-            catch (COMException) { }
-            catch (InvalidCastException) { }
-            finally { Marshal.ReleaseComObject(filter); }
-            if (rates.Count > 0) return rates;
+            if (Locate(filter)) return;
+            Marshal.ReleaseComObject(filter);
+            filter = null;
         }
-        return rates;
     }
 
-    private static void Collect(object filter, List<int> rates)
+    private bool Locate(object built)
     {
-        if (((IBaseFilter)filter).EnumPins(out var pins) != 0 || pins is null) return;
+        if (((IBaseFilter)built).EnumPins(out var pins) != 0 || pins is null) return false;
         try
         {
             var found = new IPin[1];
             while (pins.Next(1, found, IntPtr.Zero) == 0)
             {
                 var pin = found[0];
+                var keep = false;
                 try
                 {
                     if (pin.QueryDirection(out var direction) != 0 || direction != 1) continue;
-                    if (pin is not IAMStreamConfig config) continue;
-                    if (config.GetNumberOfCapabilities(out var count, out var size) != 0) continue;
-                    var scratch = Marshal.AllocCoTaskMem(size);
-                    try
-                    {
-                        for (var i = 0; i < count; i++) Read(config, i, scratch, rates);
-                    }
-                    finally { Marshal.FreeCoTaskMem(scratch); }
-                    if (rates.Count > 0) return;
+                    if (pin is not IAMStreamConfig candidate) continue;
+                    if (candidate.GetNumberOfCapabilities(out var count, out var size) != 0 || count <= 0 || size <= 0) continue;
+                    var room = Marshal.AllocCoTaskMem(size);
+                    var rates = new List<int>();
+                    for (var i = 0; i < count; i++) Read(candidate, i, room, rates);
+                    if (rates.Count == 0) { Marshal.FreeCoTaskMem(room); continue; }
+                    config = candidate;
+                    scratch = room;
+                    capabilities = count;
+                    keep = true;
+                    return true;
                 }
-                finally { Marshal.ReleaseComObject(pin); }
+                finally { if (!keep) Marshal.ReleaseComObject(pin); }
             }
         }
         finally { Marshal.ReleaseComObject(pins); }
+        return false;
     }
 
-    private static void Read(IAMStreamConfig config, int index, IntPtr scratch, List<int> rates)
+    public void Dispose() => Forget();
+
+    private static void Read(IAMStreamConfig source, int index, IntPtr scratch, List<int> rates)
     {
-        if (config.GetStreamCaps(index, out var held, scratch) != 0 || held == IntPtr.Zero) return;
+        if (source.GetStreamCaps(index, out var held, scratch) != 0 || held == IntPtr.Zero) return;
         try
         {
             var media = Marshal.PtrToStructure<MediaType>(held);

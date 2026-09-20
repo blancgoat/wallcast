@@ -8,7 +8,7 @@ internal sealed record CaptureOptions(
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000",
     string CustomSize = "1920x1080", string CustomMode = "Fill, cropping the overflow", string Anchor = "Center",
-    string Audio = "")
+    string Audio = "", string Follow = "Relaxed")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
@@ -17,6 +17,19 @@ internal sealed record CaptureOptions(
     public static readonly string[] ColorRanges = ["Limited", "Full"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
+    // How hard to watch for the source changing its sample rate. Asking the device costs about a tenth
+    // of a millisecond once the pin is held, so even the eager setting is far below anything that would
+    // show up; the reason to have the choice at all is that it is a call into a driver, and not every
+    // driver is as quick as the one this was measured on.
+    public const string FollowOff = "Off", FollowRelaxed = "Relaxed", FollowEager = "Eager";
+    public static readonly string[] Follows = [FollowRelaxed, FollowEager, FollowOff];
+    // Interval, and how many asks in a row have to disagree. The eager setting takes four of them so
+    // that a track boundary, where a device can sit between rates for a moment, is not mistaken for a
+    // change; that still settles it inside half a second.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public (int Every, int Before) Watch => Follow == FollowEager ? (100, 4) : (2000, 2);
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool Following => HasSound && Follow != FollowOff;
 
     public CaptureOptions Normalize()
     {
@@ -33,7 +46,8 @@ internal sealed record CaptureOptions(
             DynamicRanges.Contains(DynamicRange) ? DynamicRange : DynamicRanges[0],
             HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
             layout.CustomSize, layout.CustomMode, layout.Anchor,
-            (Audio ?? "").Trim());
+            (Audio ?? "").Trim(),
+            Follows.Contains(Follow) ? Follow : FollowRelaxed);
     }
 
     // An audio device the engine named, or empty for a silent capture. It is kept apart from the video

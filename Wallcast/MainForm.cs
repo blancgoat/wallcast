@@ -50,6 +50,7 @@ internal sealed class MainForm : Form
     private readonly Label geometry = new() { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0), Margin = new Padding(0, 8, 0, 0) };
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
+    private readonly ComboBox follow = Choice(CaptureOptions.Follows);
 
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer watchdog = new() { Interval = 2000 };
@@ -92,6 +93,7 @@ internal sealed class MainForm : Form
         AddCaptureSetting("Color range", colorRange);
         AddCaptureSetting("Input HDR", dynamicRange);
         AddCaptureSetting("HDR peak (nits)", hdrPeak);
+        AddCaptureSetting("Follow source rate", follow);
         AddLayoutSetting("Display aspect", aspect);
         AddLayoutSetting("Output size (W x H)", customSize);
         AddLayoutSetting("Output mapping", customMode);
@@ -283,6 +285,14 @@ internal sealed class MainForm : Form
     {
         var available = !Capturing || DeviceHasSound;
         mute.Enabled = available;
+        follow.Enabled = Capturing && DeviceHasSound;
+        soundTip.SetToolTip(follow, follow.Enabled
+            ? "A source that changes sample rate between tracks needs the sound re-opened, which freezes "
+                + "the picture for about a second and a half. Relaxed asks the device every two seconds, "
+                + "Eager ten times a second, and Off leaves the sound on whatever it was given when you "
+                + "pressed Apply. Even Eager costs about a tenth of a millisecond an ask and starts "
+                + "nothing; the reason to turn it down is that it is a call into the device's driver."
+            : "Only a device that sends sound has a rate to follow.");
 
         var reason = available
             ? "Clear this to hear the input. Capture takes the sound the device sends alongside the picture, "
@@ -367,7 +377,7 @@ internal sealed class MainForm : Form
     // taken whenever the device offers it and silenced by Mute, which keeps the toggle instant: asking
     // the engine for it only on demand would mean restarting the capture every time it is clicked.
     private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor,
-        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "");
+        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "", follow.Text);
     private Placement SelectedPlacement() => new Placement(aspect.Text, customSize.Text, customMode.Text, SelectedAnchor).Normalize();
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)
@@ -453,6 +463,7 @@ internal sealed class MainForm : Form
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
             customSize.Text = options.CustomSize; customMode.SelectedItem = options.CustomMode;
+            follow.SelectedItem = options.Follow;
             foreach (var cell in anchorCells) cell.Checked = (string?)cell.Tag == options.Anchor;
             UpdateAspectControls();
         }

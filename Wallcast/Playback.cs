@@ -18,6 +18,9 @@ internal sealed class Playback : IDisposable
     private long driftBytes, driftAt;
     private int offBand, reopens, disagreed;
     private bool reopening, deaf;
+    // Held for the life of the capture, not rebuilt per ask: finding the pin is most of the cost and
+    // the pin does not move, only its answer does.
+    private SoundFormats? asking;
     // What the device says it is receiving, which is not the same as what the pin was opened at.
     public int SoundOffered { get; private set; }
     private DesktopHost? host;
@@ -173,7 +176,10 @@ internal sealed class Playback : IDisposable
         // On the UI thread on purpose: the answer takes about eight milliseconds and the objects it
         // touches belong to this apartment. Two seconds apart, and only while there is sound to keep
         // right - a muted capture has nothing to follow.
-        if (!deaf) listen = new System.Threading.Timer(_ => Post(current, () => CheckOffered(current, screen)), null, 2000, 2000);
+        if (deaf || !options.Following) return;
+        asking ??= new SoundFormats(device.Device);
+        var watch = options.Watch;
+        listen = new System.Threading.Timer(_ => Post(current, () => CheckOffered(current, screen, watch.Before)), null, watch.Every, watch.Every);
     }
 
     // The other half of the problem, and the half that cannot be inferred from the sound itself. A card
@@ -183,12 +189,12 @@ internal sealed class Playback : IDisposable
     //
     // A device that will not answer is not asked again: the sound then simply keeps whatever it
     // negotiated when playback started, which is what it did before any of this existed.
-    private void CheckOffered(int current, Screen screen)
+    private void CheckOffered(int current, Screen screen, int before)
     {
-        if (capture is null || live is null || listen is null || reopening) return;
+        if (capture is null || live is null || listen is null || asking is null || reopening) return;
         if (capture.SoundRate <= 0) return;
         List<int> offered;
-        try { offered = SoundFormats.Rates(live.Device); }
+        try { offered = asking.Offered(); }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException) { offered = []; }
         if (offered.Count == 0)
         {
@@ -199,8 +205,8 @@ internal sealed class Playback : IDisposable
         }
         SoundOffered = offered[0];
         disagreed = offered[0] != capture.SoundRate ? disagreed + 1 : 0;
-        // Twice, because a track boundary can leave the device between rates for a moment.
-        if (disagreed < 2) return;
+        // More than once, because a track boundary can leave the device between rates for a moment.
+        if (disagreed < before) return;
         Status?.Invoke($"The source is now {offered[0]} Hz and the sound was opened at {capture.SoundRate}; re-opening.");
         Reopen(current, screen);
     }
@@ -357,6 +363,8 @@ internal sealed class Playback : IDisposable
         surface = null;
         capture?.Dispose();
         capture = null;
+        asking?.Dispose();
+        asking = null;
         live = null;
         source = null;
     }

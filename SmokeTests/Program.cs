@@ -192,10 +192,17 @@ internal static class Program
                     Console.WriteLine($"{candidate}: {(rates.Count == 0 ? "no answer" : string.Join(", ", rates))} ({clock.Elapsed.TotalMilliseconds:F1} ms)");
                 }
                 // Repeated, because a leak or a double free shows up on the tenth call rather than the first.
-                var repeats = Stopwatch.StartNew();
                 var device = name ?? CaptureDevices.Enumerate()[0];
+                var cold = Stopwatch.StartNew();
                 for (var i = 0; i < 50; i++) SoundFormats.Rates(device);
-                Console.WriteLine($"50 more asks took {repeats.Elapsed.TotalMilliseconds:F0} ms in total");
+                Console.WriteLine($"50 asks finding the pin each time: {cold.Elapsed.TotalMilliseconds / 50:F2} ms each");
+                using (var held = new SoundFormats(device))
+                {
+                    held.Offered();
+                    var warm = Stopwatch.StartNew();
+                    for (var i = 0; i < 500; i++) held.Offered();
+                    Console.WriteLine($"500 asks holding the pin: {warm.Elapsed.TotalMilliseconds / 500:F3} ms each");
+                }
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 Console.WriteLine("PASS: the device answered and the process is still standing");
@@ -213,7 +220,9 @@ internal static class Program
                     ?? CaptureDevices.Enumerate()[0];
                 var audible = CaptureDevices.EnumerateAudio();
                 Console.WriteLine($"DEVICES: {audible.Count} can send sound: {string.Join(", ", audible)}");
-                var settings = new CaptureOptions(Audio: audible.Contains(device) ? device : "").Normalize();
+                var settings = new CaptureOptions(Audio: audible.Contains(device) ? device : "",
+                    Follow: args.Contains("--eager") ? CaptureOptions.FollowEager : CaptureOptions.FollowRelaxed).Normalize();
+                if (args.Contains("--follow")) Console.WriteLine($"FOLLOW: {settings.Follow}, asking every {settings.Watch.Every}ms, acting after {settings.Watch.Before}");
                 if (!settings.HasSound) { Console.WriteLine($"SKIP: {device} sends no sound"); return 0; }
                 using var dispatcher = new Control();
                 _ = dispatcher.Handle;
@@ -541,6 +550,16 @@ internal static class Program
             if (loudArgs.Contains("-sample_rate")) throw new Exception("A rate was forced on the device instead of taking its own: " + loudArgs);
             if (!loudArgs.Contains("-ac 2")) throw new Exception("Sound could reach the player in some layout it will not be played in: " + loudArgs);
             if (quietArgs.Contains("-channels")) throw new Exception("A silent capture negotiated a sound format: " + quietArgs);
+            // Following the source costs an ask into the device, so it is a choice, and Off has to mean off.
+            if (silent.Following) throw new Exception("A silent capture was going to watch for rate changes");
+            if (!loud.Following) throw new Exception("A capture with sound was not going to follow the source");
+            if ((loud with { Follow = CaptureOptions.FollowOff }).Normalize().Following) throw new Exception("Off did not turn it off");
+            var relaxed = loud.Watch;
+            var eager = (loud with { Follow = CaptureOptions.FollowEager }).Normalize().Watch;
+            if (relaxed.Every <= eager.Every) throw new Exception("Eager is not more eager than relaxed");
+            // Both settle in well under the second and a half a re-open itself takes.
+            if (eager.Every * eager.Before > 600 || relaxed.Every * relaxed.Before > 5000)
+                throw new Exception($"Settling takes {eager.Every * eager.Before}ms eager, {relaxed.Every * relaxed.Before}ms relaxed");
             if (!loudRun.RedirectStandardOutput) throw new Exception("Nothing is listening on the engine's stdout");
             if (!loudArgs.Contains("-map 0:v")) throw new Exception("The picture lost its own mapping once sound was added");
             Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors, shared by video and capture, sound on one input");
