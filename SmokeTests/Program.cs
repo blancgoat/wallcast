@@ -42,12 +42,20 @@ internal static class Program
                     var reason = tips.GetToolTip(Field("anchorGrid")) ?? "";
                     if (live && reason.Length > 0) throw new Exception("A usable grid should not explain itself away");
                     if (!live && reason.Length < 20) throw new Exception("A greyed grid must say why: " + reason);
+                    if (reason.Length > 0) Readable("anchor", reason);
                     if ((tips.GetToolTip(Field("anchorCaption")) ?? "").Length < 20) throw new Exception("The caption carries no explanation");
                     Console.WriteLine($"PASS: {name} settings rendered with placement on show (anchor grid {(live ? "live" : "greyed: " + reason)})");
                 }
                 // Sound follows the device: a card sends its own alongside the picture, a virtual camera
                 // sends none, and a checkbox that cannot do anything has to say why.
                 if (!soundTip.ShowAlways) throw new Exception("The sound explanation would stay hidden unless the window is active");
+                // A tooltip is drawn on one line however long it is, so a long explanation has to carry
+                // its own breaks or it runs off the edge of the screen and cannot be read.
+                static int Longest(string text) => text.Split(Environment.NewLine).Max(line => line.Length);
+                void Readable(string what, string text)
+                {
+                    if (Longest(text) > 100) throw new Exception($"The {what} explanation runs {Longest(text)} characters before breaking");
+                }
                 var silence = (ComboBox)Field("sound");
                 chooser.SelectedIndex = 1;
                 Application.DoEvents();
@@ -60,10 +68,12 @@ internal static class Program
                     box.SelectedItem = device;
                     Application.DoEvents();
                     var why = soundTip.GetToolTip(silence) ?? "";
-                    if (why.Length < 40) throw new Exception($"{device} leaves the mute box unexplained: " + why);
+                    if (why.Length < 40) throw new Exception($"{device} leaves the sound setting unexplained: " + why);
+                    Readable(device + " sound", why);
                     if (!silence.Enabled && !why.Contains("no sound")) throw new Exception($"{device} greys the setting out without saying so: " + why);
                     if (silence.Enabled && silence.Items.Count != CaptureOptions.Sounds.Length) throw new Exception($"{device} was not offered every sound setting");
-                    Console.WriteLine($"PASS: {device} · sound {(silence.Enabled ? "live with " + silence.Items.Count + " settings" : "greyed")}");
+                    Console.WriteLine($"PASS: {device} · sound {(silence.Enabled ? "live with " + silence.Items.Count + " settings" : "greyed")}" +
+                        $" · explanation {why.Split(Environment.NewLine).Length} lines, longest {Longest(why)}");
                 }
                 return 0;
             }

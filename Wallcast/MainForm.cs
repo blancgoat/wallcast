@@ -299,17 +299,24 @@ internal sealed class MainForm : Form
             sound.Items.AddRange(offered.Cast<object>().ToArray());
             sound.SelectedIndex = Math.Max(0, Array.IndexOf(offered, chosen));
         }
+        // Laid out as the list it is. A tooltip is drawn as one line unless the text says otherwise,
+        // and one line of this runs off the edge of the screen.
         var reason = !available
-            ? "This device sends a picture and no sound, so there is nothing to turn on. A virtual camera "
-                + "has no sound of its own; route it through a virtual audio device and capture that instead."
+            ? Wrap("This device sends a picture and no sound, so there is nothing to turn on. A virtual "
+                + "camera has no sound of its own: route its audio through a virtual audio device and "
+                + "capture that instead.")
             : !Capturing
-                ? "Whether the video file is heard. It can be changed while it plays."
-                : "Off asks the device for no sound at all and costs nothing. On takes the sound the device "
-                + "is sending when you press Apply and leaves it there. The two following entries re-open "
-                + "the sound when the source changes its sample rate between tracks, which freezes the "
-                + "picture for about a second and a half: following settles within four seconds and costs "
-                + "well under a percent of a core, following closely settles within one and costs under two. "
-                + "Like every other capture setting, it takes effect on Apply.";
+                ? Wrap("Whether the video file is heard. It takes effect where it stands, without applying again.")
+            : string.Join(Environment.NewLine,
+                "Off — the device is asked for no sound at all. Nothing is captured and nothing is spent.",
+                "On — the sound the device is sending when you press Apply, left as it is.",
+                "On, following the source — re-opens the sound when the source changes its sample",
+                "    rate, within about four seconds. Costs under half a percent of a core.",
+                "On, following closely — the same within about a second, for a source that changes",
+                "    rate track by track. Costs under two percent.",
+                "",
+                "Re-opening freezes the picture for about a second and a half; it does not go black.",
+                "Takes effect on Apply, like every other capture setting.");
         soundTip.SetToolTip(sound, reason);
         soundTip.SetToolTip(soundRow, reason);
     }
@@ -372,9 +379,9 @@ internal sealed class MainForm : Form
         }
         anchorsActive = blocked is null;
         // A disabled control gets no mouse messages, so the reason has to live on the grid behind them.
-        anchorTips.SetToolTip(anchorGrid, blocked ?? string.Empty);
+        anchorTips.SetToolTip(anchorGrid, blocked is null ? string.Empty : Wrap(blocked));
         UpdateGeometry();
-        if (anchorCaption is not null) anchorTips.SetToolTip(anchorCaption, blocked ?? "Where the picture sits on the monitor.");
+        if (anchorCaption is not null) anchorTips.SetToolTip(anchorCaption, Wrap(blocked ?? "Where the picture sits on the monitor."));
         PaintAnchors();
     }
     private void UpdateHdrControls()
@@ -438,6 +445,21 @@ internal sealed class MainForm : Form
                 : chosen ? Color.FromArgb(0, 78, 145) : SystemColors.ControlDark;
         }
     }
+    // WinForms draws a tooltip on one line however long it is, so the breaks have to be put in.
+    private static string Wrap(string text, int width = 84)
+    {
+        var lines = new List<string>();
+        var line = new System.Text.StringBuilder();
+        foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.Length > 0 && line.Length + 1 + word.Length > width) { lines.Add(line.ToString()); line.Clear(); }
+            if (line.Length > 0) line.Append(' ');
+            line.Append(word);
+        }
+        if (line.Length > 0) lines.Add(line.ToString());
+        return string.Join(Environment.NewLine, lines);
+    }
+
     private static FlowLayoutPanel Row() => new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0, 8, 0, 0) };
     private static Label Caption(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(0, 16, 0, 5) };
     private static Button Button(string text, EventHandler click)
