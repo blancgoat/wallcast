@@ -158,7 +158,6 @@ internal sealed class MainForm : Form
                 UpdateSoundControls();
                 if (!Capturing) playback?.SetMute(soundOff.Checked);
             };
-        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · sound is not used until you say so", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
         actions.Controls.Add(Button("Apply to desktop", Apply));
