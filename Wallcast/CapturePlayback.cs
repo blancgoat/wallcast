@@ -27,6 +27,8 @@ internal sealed class CapturePlayback : IDisposable
     public event Action? FrameReady;
     public CaptureOptions Options { get; }
     public string? InputDescription { get; private set; }
+    // The engine's stdout, carrying WAV, for whoever is going to play it. Null for a silent capture.
+    public Stream? Sound => Options.HasSound ? process.StandardOutput.BaseStream : null;
 
     public CapturePlayback(string device, int buffer, CaptureOptions options)
     {
@@ -94,6 +96,13 @@ internal sealed class CapturePlayback : IDisposable
                 Failed?.Invoke("No capture input. Check that the device supports the selected format, resolution and frame rate.\n" + string.Join("\n", errors.TakeLast(5)));
             }
         }
+    }
+
+    // Ends the engine without waiting on anything. Whoever is reading its stdout for sound is blocked
+    // in a read that only returns once there is data or the writer is gone, so this comes first.
+    public void Kill()
+    {
+        try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { }
     }
 
     public byte[]? TakeFrame() => Interlocked.Exchange(ref latest, null);

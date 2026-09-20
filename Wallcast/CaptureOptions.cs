@@ -7,7 +7,8 @@ internal sealed record CaptureOptions(
     string Format = "NV12", string Resolution = "1920x1080", string Fps = "60",
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000",
-    string CustomSize = "1920x1080", string CustomMode = "Fill, cropping the overflow", string Anchor = "Center")
+    string CustomSize = "1920x1080", string CustomMode = "Fill, cropping the overflow", string Anchor = "Center",
+    string Audio = "")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
@@ -31,8 +32,15 @@ internal sealed record CaptureOptions(
             layout.Aspect,
             DynamicRanges.Contains(DynamicRange) ? DynamicRange : DynamicRanges[0],
             HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
-            layout.CustomSize, layout.CustomMode, layout.Anchor);
+            layout.CustomSize, layout.CustomMode, layout.Anchor,
+            (Audio ?? "").Trim());
     }
+
+    // An audio device the engine named, or empty for a silent capture. It is kept apart from the video
+    // device because the two need not be the same thing: a capture card carries its own sound, while a
+    // virtual camera has none at all and has to borrow a virtual audio device.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasSound => Audio.Length > 0;
 
     // The geometry half of these settings, in the form both inputs share.
     [System.Text.Json.Serialization.JsonIgnore]
@@ -76,7 +84,11 @@ internal sealed record CaptureOptions(
         if (this != Normalize()) throw new InvalidOperationException("Unsupported capture settings.");
         var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "capture", "ffmpeg.exe"))
         {
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true,
+            // Sound leaves on stdout. The picture cannot: a redirected stdout pipe stalls long before
+            // 4K BGRA needs it to, which is why that went to a named pipe. Stereo PCM is a thousandth
+            // of the traffic and never comes close.
+            RedirectStandardOutput = HasSound
         };
         var frameSize = FrameSize;
         // Bound the DirectShow queue; the renderer separately keeps only the newest frame. Sizing this
@@ -94,8 +106,15 @@ internal sealed record CaptureOptions(
             info.ArgumentList.Add("-pixel_format");
             info.ArgumentList.Add(Format switch { "YUY2" => "yuyv422", "UYVY" => "uyvy422", "RGB24" => "bgr24", _ => "nv12" });
         }
-        foreach (var arg in new[] { "-i", "video=" + device, "-an", "-sn", "-dn", "-vf", ConversionFilter,
+        // One input, both pins. A card that carries its sound alongside the picture will not hand it
+        // over as a device of its own, so asking for it separately fails to connect the pins at all.
+        foreach (var arg in new[] { "-i", HasSound ? $"video={device}:audio={Audio}" : "video=" + device,
+            "-map", "0:v", "-an", "-sn", "-dn", "-vf", ConversionFilter,
             "-fps_mode", "passthrough", "-threads", "2", "-f", "rawvideo", "-pix_fmt", "bgra", output }) info.ArgumentList.Add(arg);
+        // Uncompressed, because the player is in the same box and anything else would only cost latency.
+        if (HasSound)
+            foreach (var arg in new[] { "-map", "0:a", "-vn", "-c:a", "pcm_s16le", "-f", "wav", "pipe:1" })
+                info.ArgumentList.Add(arg);
         return info;
     }
 

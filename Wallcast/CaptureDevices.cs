@@ -1,10 +1,40 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using System.Text.RegularExpressions;
 
 namespace Wallcast;
 
 internal static class CaptureDevices
 {
+    // Sound is asked of the capture engine rather than of DirectShow directly, because the two do not
+    // agree. A capture card carries its audio on a pin of the video device instead of registering an
+    // audio device of its own, so the audio category alone would leave the card off the list; the
+    // engine's own listing is the one that matches what it will accept.
+    private static readonly Regex Listed = new(@"""(?<name>[^""]+)"" \((?<kinds>[^)]*)\)", RegexOptions.Compiled);
+
+    public static List<string> EnumerateAudio()
+    {
+        var names = new List<string>();
+        var engine = Path.Combine(AppContext.BaseDirectory, "capture", "ffmpeg.exe");
+        if (!File.Exists(engine)) return names;
+        var info = new ProcessStartInfo(engine)
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
+        foreach (var arg in new[] { "-hide_banner", "-nostdin", "-list_devices", "true", "-f", "dshow", "-i", "dummy" })
+            info.ArgumentList.Add(arg);
+        using var process = Process.Start(info);
+        if (process is null) return names;
+        // Listing is the whole job here, so the non-zero exit for the dummy input is expected.
+        var report = process.StandardError.ReadToEnd();
+        if (!process.WaitForExit(10000)) { try { process.Kill(true); } catch { } }
+        foreach (Match match in Listed.Matches(report))
+        {
+            var name = match.Groups["name"].Value;
+            if (match.Groups["kinds"].Value.Contains("audio") && !names.Contains(name)) names.Add(name);
+        }
+        return names;
+    }
+
     public static List<string> Enumerate()
     {
         var names = new List<string>();

@@ -15,7 +15,7 @@ A small live wallpaper app for Windows. Point it at a capture card or virtual ca
 3. Pick the output monitor and press **Apply to desktop**.
 4. **Stop** brings your original wallpaper back. The window's X hides to the tray; **Exit** in the tray menu quits for real.
 
-Video keeps its own shape and loops without a seam: the player repeats the file itself rather than being stopped and started, which used to leave the desktop bare for about a fifth of a second every time round. It is muted by default and can be unmuted. Either input can be placed on the monitor the same way; see [Placement](#placement). Capture is video only. The capture buffer value sets the DirectShow queue capacity and is not an exact latency figure. That capacity is worked out from the frame size of the format the device emits, so the same value holds the same number of frames as the resolution goes up. The screen always shows the newest frame, presented as soon as it arrives.
+Video keeps its own shape and loops without a seam: the player repeats the file itself rather than being stopped and started, which used to leave the desktop bare for about a fifth of a second every time round. Either input can be placed on the monitor the same way; see [Placement](#placement). Both are muted by default and can be unmuted; see [Sound](#sound). The capture buffer value sets the DirectShow queue capacity and is not an exact latency figure. That capacity is worked out from the frame size of the format the device emits, so the same value holds the same number of frames as the resolution goes up. The screen always shows the newest frame, presented as soon as it arrives.
 
 ### Capture settings
 
@@ -26,10 +26,25 @@ Video keeps its own shape and loops without a seam: the player repeats the file 
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Input HDR / peak | **SDR**, HDR10 / PQ → SDR, HLG → SDR · **1000** nits |
+| Sound | taken from the device's own audio pin when it has one · **muted** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
 For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited / Input resolution**. If blacks look raised or shadow detail is crushed, change the color range to match the actual source. If the card pillarboxes a 4:3 source into its 16:9 frame, set **Display aspect** to `Output resolution` with `Fill, cropping the overflow` and those bars come off.
+
+### Sound
+
+Everything starts muted. Clear **Mute** to hear the input.
+
+A capture device's sound comes off the device itself, on a pin beside the picture, and there is nothing
+separate to choose: it is taken whenever the device offers any and silenced by the checkbox, which is
+what makes the toggle instant rather than a restart of the capture. Not every device has any. A virtual
+camera sends a picture and nothing else - OBS's does not carry audio and registers no audio device to
+go with it - and for those the checkbox greys out and says why on hover. To hear an OBS scene, send its
+audio to a virtual audio device and capture that, alongside the virtual camera, as the sound source.
+
+The picture and the sound travel separately, so they are not locked together to the sample. The sound
+is buffered by the capture buffer value, the same dial that trades latency for a steady picture.
 
 ### Placement
 
@@ -138,7 +153,7 @@ licence and where its source lives. Keep both in any archive you distribute.
 - `Playback.cs`: picks the playback path per input, LibVLC video playback, seamless looping, the crop and display aspect it hands the player, errors and cleanup.
 - `VideoProbe.cs`: reads a video file's displayed shape out of the bundled FFmpeg, so a file can be placed like a capture.
 - `CaptureOptions.cs`: pixel format, resolution, FPS and YUV conversion, plus the crop that takes the capture card's black bars off. The geometry itself belongs to `Placement.cs`.
-- `CapturePlayback.cs`: FFmpeg DirectShow input, explicit color conversion, keeps the newest frame. Frames arrive over a named pipe. A redirected stdout pipe has a small buffer and stalls near 800 MB/s, while 4K 60fps BGRA needs 2.0 GB/s.
+- `CapturePlayback.cs`: FFmpeg DirectShow input, explicit color conversion, keeps the newest frame. Sound, when the device has any, leaves the same process on stdout as WAV and is played from that stream. Frames arrive over a named pipe. A redirected stdout pipe has a small buffer and stalls near 800 MB/s, while 4K 60fps BGRA needs 2.0 GB/s.
 - `CaptureSurface.cs`: presents BGRA frames through a DXGI flip-model swap chain and keeps the aspect ratio. Scaling runs on the GPU.
 - `DesktopHost.cs`: attaches the video window to the Windows Explorer WorkerW.
 - `CaptureDevices.cs`: DirectShow video device discovery.
@@ -179,7 +194,19 @@ Form check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contai
 
 Throughput check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --bench "Live Gamer BOLT"`. It reports frames per second and MB/s actually received at 1080p, 1440p and 4K. Anything slower than the device emits means that difference in frames piling up in the queue as latency. Start here for latency problems.
 
-Real device check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. It opens NV12/Rec.709/Limited/1080p60 for ten seconds and checks that frames arrive. Adding `--snapshot` saves one frame to `artifacts/capture-nv12-rec709.png`. The app itself never records or saves the screen.
+Real device check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. It opens NV12/Rec.709/Limited/1080p60 for ten seconds and checks that frames arrive. Adding `--snapshot` saves one frame to `artifacts/capture-nv12-rec709.png`. Adding `--sound` also asks the device for its audio and writes what the player decodes out of the engine's stdout to `artifacts/capture-sound.wav`, so the size of that file says whether sound ran at real time for the whole ten seconds. The app itself never records or saves the screen.
+
+Sound path check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --sound "Live Gamer BOLT"`. This one drives the app's own playback: it puts the device on the desktop with sound, mutes and unmutes it while it runs, and times the stop. The timing is the point. The player reads the engine's stdout, and a read there only returns once there is data or the writer is gone, so stopping in the wrong order would park the UI thread on a read nothing is going to answer. It ends the engine first, and the stop is expected to take well under a second.
+
+2026-09-20, capture sound. The Mute checkbox works for capture as well as video, and a capture device
+hands over the sound it sends alongside the picture. Both are muted to begin with. It travels as WAV on
+the engine's stdout, which the picture could never use - it stalls near 800 MB/s - but stereo PCM is a
+thousandth of that traffic. Measured: 1593 KB decoded over 9.25s, which is 44.1kHz stereo at real time
+exactly, with no effect on the frame rate. Two things were settled by measurement rather than
+assumption: a capture card will not hand its sound over as a device of its own, so it has to be asked
+for on the same input as the picture, and OBS's virtual camera has no sound at all - it registers no
+audio device to go with the camera - so the checkbox greys out and says so. Not verified: whether what
+comes through is audible, because the card was sending silence at the time.
 
 2026-09-20, 1.1.0, video parity. The video path caught up with capture. It takes the same output resolution,
 mapping and screen position, placed by the same arithmetic against the shape the file turns out to be,

@@ -12,7 +12,13 @@ internal sealed class MainForm : Form
     private readonly ComboBox devices = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox monitors = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly NumericUpDown cache = new() { Minimum = 50, Maximum = 2000, Increment = 50, Value = 150 };
-    private readonly CheckBox mute = new() { Text = "Mute video", Checked = true, AutoSize = true };
+    private readonly CheckBox mute = new() { Text = "Mute", Checked = true, AutoSize = true };
+    // A disabled control gets no mouse messages, so the reason it is disabled has to hang on a parent.
+    private readonly FlowLayoutPanel muteRow = Row();
+    private readonly ToolTip soundTip = new() { ShowAlways = true, AutoPopDelay = 15000, InitialDelay = 350 };
+    // Which devices the engine says can hand over sound. A capture card carries its own on a pin of the
+    // video device; a virtual camera has none, and asking it for sound would cost the picture too.
+    private string[] audible = [];
     private readonly Label status = new() { Text = "Choose an input and apply it.", AutoSize = true, MaximumSize = new Size(490, 0) };
     private readonly FlowLayoutPanel fileRow = Row();
     private readonly FlowLayoutPanel captureRow = Row();
@@ -129,9 +135,10 @@ internal sealed class MainForm : Form
         body.Controls.Add(Caption("Output monitor"));
         monitors.Width = 490;
         body.Controls.Add(monitors);
-        mute.Margin = new Padding(0, 14, 0, 10);
-        body.Controls.Add(mute);
-        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · capture is video only", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
+        muteRow.Margin = new Padding(0, 14, 0, 10);
+        muteRow.Controls.Add(mute);
+        body.Controls.Add(muteRow);
+        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · sound is off until you clear Mute", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
         actions.Controls.Add(Button("Apply to desktop", Apply));
@@ -142,6 +149,7 @@ internal sealed class MainForm : Form
         mode.SelectedIndexChanged += (_, _) => UpdateMode();
         path.TextChanged += (_, _) => ProbeVideo();
         monitors.SelectedIndexChanged += (_, _) => UpdateAspectControls();
+        devices.SelectedIndexChanged += (_, _) => UpdateSoundControls();
         mute.CheckedChanged += (_, _) => playback?.SetMute(mute.Checked);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Wallcast", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
@@ -213,6 +221,9 @@ internal sealed class MainForm : Form
         devices.Items.Clear();
         try
         {
+            // Asking the engine costs a short run, so it happens here rather than on every repaint.
+            try { audible = CaptureDevices.EnumerateAudio().ToArray(); }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException) { audible = []; }
             devices.Items.AddRange(CaptureDevices.Enumerate().Cast<object>().ToArray());
             if (old is not null && devices.Items.Contains(old)) devices.SelectedItem = old;
             else if (devices.Items.Count > 0) devices.SelectedIndex = 0;
@@ -263,7 +274,21 @@ internal sealed class MainForm : Form
         parent?.ResumeLayout(true);
         // The frame a placement applies to changes with the mode, so the readout has to be redone.
         UpdateAspectControls();
+        UpdateSoundControls();
     }
+    // Sound follows the input: a video file always has some, a capture device only if it sends any.
+    private bool DeviceHasSound => devices.SelectedItem is string name && audible.Contains(name);
+    private void UpdateSoundControls()
+    {
+        var available = !Capturing || DeviceHasSound;
+        mute.Enabled = available;
+        var reason = available
+            ? "Clear this to hear the input. Capture takes the sound the device sends alongside the picture."
+            : "This device sends a picture and no sound, so there is nothing to unmute. A virtual camera has no sound of its own; route it through a virtual audio device and capture that instead.";
+        soundTip.SetToolTip(mute, reason);
+        soundTip.SetToolTip(muteRow, reason);
+    }
+
     private static ComboBox Choice(string[] values)
     {
         var choice = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 325, Margin = new Padding(3, 4, 3, 4) };
@@ -335,7 +360,11 @@ internal sealed class MainForm : Form
         if (hdr) colorSpace.SelectedItem = "Rec.2020";
         else if (colorSpace.Text == "Rec.2020") colorSpace.SelectedItem = "Rec.709";
     }
-    private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor);
+    // The sound comes off the same device as the picture, so there is nothing separate to choose. It is
+    // taken whenever the device offers it and silenced by Mute, which keeps the toggle instant: asking
+    // the engine for it only on demand would mean restarting the capture every time it is clicked.
+    private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor,
+        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "");
     private Placement SelectedPlacement() => new Placement(aspect.Text, customSize.Text, customMode.Text, SelectedAnchor).Normalize();
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)

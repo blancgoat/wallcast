@@ -9,6 +9,7 @@ internal sealed class Playback : IDisposable
     private readonly LibVLC engine;
     private MediaPlayer? player;
     private CapturePlayback? capture;
+    private MediaPlayer? sound;
     private DesktopHost? host;
     private IWallpaperSource? source;
     private int generation;
@@ -46,12 +47,28 @@ internal sealed class Playback : IDisposable
                 area.Offset(screen.Bounds.Location);
                 host.Attach(screen, area);
                 capture = new CapturePlayback(device.Device, device.CacheMilliseconds, options);
-                capture.Started += () => Post(current, () => Status?.Invoke($"Playing · {options.Format} / {options.ColorSpace} / {options.DynamicRange} / {options.Resolution} / {options.Fps}fps"));
-                capture.Failed += detail => Post(current, () => { Stop(); Status?.Invoke(detail); });
+                capture.Started += () => Post(current, () => Status?.Invoke($"Playing · {options.Format} / {options.ColorSpace} / {options.DynamicRange} / {options.Resolution} / {options.Fps}fps"
+                    + (options.HasSound ? " · sound from " + options.Audio : "")));
+                capture.Failed += detail => Post(current, () =>
+                {
+                    // A device that turns out not to hand over the audio it was asked for must not cost
+                    // the picture as well. Nothing has been seen yet, so there is nothing to interrupt.
+                    if (options.HasSound && capture?.Frames == 0)
+                    {
+                        Start(device with { Options = options with { Audio = "" } }, screen, mute);
+                        Status?.Invoke($"{options.Audio} gave no sound, so the picture is playing without it.");
+                        return;
+                    }
+                    Stop();
+                    Status?.Invoke(detail);
+                });
                 var surface = new CaptureSurface(capture);
                 surface.Failed += detail => Post(current, () => { Stop(); Status?.Invoke(detail); });
                 host.Controls.Add(surface);
                 capture.Start();
+                // Started before the picture is asked for, so nothing is left filling the engine's
+                // stdout while waiting: a full pipe there would stall the picture along with it.
+                if (capture.Sound is { } stream) PlaySound(stream, device.CacheMilliseconds, mute);
                 return;
             }
             var video = (VideoSource)input;
@@ -106,6 +123,23 @@ internal sealed class Playback : IDisposable
         catch { Stop(); throw; }
     }
 
+    // Sound arrives as WAV on the engine's stdout, so the player reads the stream rather than a file.
+    // Caching follows the capture buffer: the same dial that decides how much latency to trade for a
+    // steady picture decides it for the sound, and the two paths are not locked to each other anyway.
+    private void PlaySound(Stream stream, int cacheMilliseconds, bool mute)
+    {
+        var media = new Media(engine, new StreamMediaInput(stream),
+            ":no-video", ":demux=wav", ":file-caching=" + Math.Max(100, cacheMilliseconds));
+        try
+        {
+            sound = new MediaPlayer(engine) { Mute = mute };
+            sound.EnableKeyInput = false;
+            sound.EnableMouseInput = false;
+            sound.Play(media);
+        }
+        finally { media.Dispose(); }
+    }
+
     private static long Gcd(long one, long other) => other == 0 ? one : Gcd(other, one % other);
 
     // VLC multiplies these by a frame dimension in 32 bits, so a ratio that did not reduce to small
@@ -144,13 +178,23 @@ internal sealed class Playback : IDisposable
         catch (InvalidOperationException) { }
     }
 
-    public void SetMute(bool mute) { if (player is not null) player.Mute = mute; }
+    public void SetMute(bool mute)
+    {
+        if (player is not null) player.Mute = mute;
+        if (sound is not null) sound.Mute = mute;
+    }
     public void Stop()
     {
         generation++;
         player?.Stop();
         player?.Dispose();
         player = null;
+        // The sound player is reading the engine's stdout, so the engine goes first: otherwise the
+        // player is asked to stop while parked in a read that nothing is going to answer.
+        capture?.Kill();
+        sound?.Stop();
+        sound?.Dispose();
+        sound = null;
         // Tear the window down first: it owns the renderer that reads frames from the capture.
         host?.Dispose();
         host = null;

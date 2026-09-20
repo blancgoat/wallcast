@@ -25,6 +25,7 @@ internal static class Program
                 var tips = (ToolTip)typeof(MainForm).GetField("anchorTips", hidden)!.GetValue(form)!;
                 var cells = (RadioButton[])typeof(MainForm).GetField("anchorCells", hidden)!.GetValue(form)!;
                 var chooser = (ComboBox)Field("mode");
+                var soundTip = (ToolTip)typeof(MainForm).GetField("soundTip", hidden)!.GetValue(form)!;
                 if (!tips.ShowAlways) throw new Exception("Tooltips would stay hidden unless the window is active");
                 // Placement is asked of both inputs now, so it has to survive the switch between them.
                 foreach (var (index, name) in new[] { (0, "capture"), (1, "video") })
@@ -43,6 +44,24 @@ internal static class Program
                     if (!live && reason.Length < 20) throw new Exception("A greyed grid must say why: " + reason);
                     if ((tips.GetToolTip(Field("anchorCaption")) ?? "").Length < 20) throw new Exception("The caption carries no explanation");
                     Console.WriteLine($"PASS: {name} settings rendered with placement on show (anchor grid {(live ? "live" : "greyed: " + reason)})");
+                }
+                // Sound follows the device: a card sends its own alongside the picture, a virtual camera
+                // sends none, and a checkbox that cannot do anything has to say why.
+                if (!soundTip.ShowAlways) throw new Exception("The sound explanation would stay hidden unless the window is active");
+                var silence = (CheckBox)Field("mute");
+                chooser.SelectedIndex = 1;
+                Application.DoEvents();
+                if (!silence.Enabled) throw new Exception("A video file always has sound to mute");
+                chooser.SelectedIndex = 0;
+                var box = (ComboBox)Field("devices");
+                foreach (string device in box.Items)
+                {
+                    box.SelectedItem = device;
+                    Application.DoEvents();
+                    var why = soundTip.GetToolTip(silence) ?? "";
+                    if (why.Length < 40) throw new Exception($"{device} leaves the mute box unexplained: " + why);
+                    if (!silence.Enabled && !why.Contains("no sound")) throw new Exception($"{device} greys the box out without saying so: " + why);
+                    Console.WriteLine($"PASS: {device} · mute {(silence.Enabled ? "live" : "greyed")}");
                 }
                 return 0;
             }
@@ -159,6 +178,38 @@ internal static class Program
                 probe.Start();
                 Application.Run();
                 return result;
+            }
+            // Sound and picture come out of one engine process, and the player reads that process's
+            // stdout. A read there only returns when there is data or the writer is gone, so stopping
+            // in the wrong order parks the UI thread on a read nothing will answer. This drives the
+            // app's own playback path and times the stop.
+            if (args.Contains("--sound") && !args.Contains("--capture"))
+            {
+                Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+                Application.EnableVisualStyles();
+                var device = args.SkipWhile(a => a != "--sound").Skip(1).Take(1).FirstOrDefault(a => !a.StartsWith("--"))
+                    ?? CaptureDevices.Enumerate()[0];
+                var audible = CaptureDevices.EnumerateAudio();
+                Console.WriteLine($"DEVICES: {audible.Count} can send sound: {string.Join(", ", audible)}");
+                var settings = new CaptureOptions(Audio: audible.Contains(device) ? device : "").Normalize();
+                if (!settings.HasSound) { Console.WriteLine($"SKIP: {device} sends no sound"); return 0; }
+                using var dispatcher = new Control();
+                _ = dispatcher.Handle;
+                using var live = new Playback(dispatcher);
+                live.Status += text => Console.WriteLine("STATUS: " + text);
+                live.Start(new CaptureSource(device, 150, settings), Screen.PrimaryScreen!, mute: false);
+                for (var i = 0; i < 100; i++) { Application.DoEvents(); Thread.Sleep(50); }
+                // Muting must not disturb the picture, which is why the sound is captured either way.
+                live.SetMute(true);
+                for (var i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(50); }
+                live.SetMute(false);
+                for (var i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(50); }
+                var stopping = Stopwatch.StartNew();
+                live.Stop();
+                Console.WriteLine($"STOP: playing with sound stopped in {stopping.ElapsedMilliseconds} ms");
+                if (stopping.ElapsedMilliseconds > 3000) { Console.WriteLine("FAIL: stopping hung, most likely on the sound stream"); return 2; }
+                Console.WriteLine("PASS: capture with sound plays, mutes live and stops cleanly");
+                return 0;
             }
             // The loop is where a video wallpaper gives itself away: restarting the player throws the
             // video output away, and for as long as that takes there is a hole in the desktop with the
@@ -315,12 +366,41 @@ internal static class Program
             foreach (var device in devices) Console.WriteLine("DEVICE: " + device);
             if (args.Length > 0 && args[0] == "--capture")
             {
-                var captureOptions = new CaptureOptions(DynamicRange: args.Contains("--pq") ? CaptureOptions.DynamicRanges[1] : args.Contains("--hlg") ? CaptureOptions.DynamicRanges[2] : "SDR");
-                using var capture = new CapturePlayback(args.Length > 1 ? args[1] : devices[0], 150, captureOptions);
+                var name = args.Length > 1 && !args[1].StartsWith("--") ? args[1] : devices[0];
+                var captureOptions = new CaptureOptions(DynamicRange: args.Contains("--pq") ? CaptureOptions.DynamicRanges[1] : args.Contains("--hlg") ? CaptureOptions.DynamicRanges[2] : "SDR",
+                    Audio: args.Contains("--sound") ? name : "");
+                using var capture = new CapturePlayback(name, 150, captureOptions);
                 string? failure = null;
                 capture.Failed += message => { failure = message; Console.WriteLine(message); };
                 capture.Start();
+                // The whole sound path end to end: the engine's stdout, read as a stream by the player,
+                // decoded, and written out by the file audio output so there is something to weigh.
+                var recording = Path.GetFullPath("artifacts/capture-sound.wav");
+                MediaPlayer? speaker = null;
+                LibVLC? speakerEngine = null;
+                if (capture.Sound is { } heard)
+                {
+                    if (File.Exists(recording)) File.Delete(recording);
+                    // Its own engine, because the one above is deliberately deaf: --aout=dummy there
+                    // would swallow the very thing this is trying to weigh.
+                    // The output module is chosen for the instance, not for one media, so it goes here.
+                    speakerEngine = new LibVLC("--no-video-title-show", "--vout=dummy", "--aout=afile",
+                        "--audiofile-file=" + recording);
+                    speakerEngine.Log += (_, e) => { if (e.Level >= LogLevel.Warning) Console.WriteLine($"VLC {e.Level}: {e.Module}: {e.Message}"); };
+                    using var track = new Media(speakerEngine, new StreamMediaInput(heard), ":no-video", ":file-caching=150");
+                    speaker = new MediaPlayer(speakerEngine);
+                    speaker.Play(track);
+                }
                 Thread.Sleep(10000);
+                if (speaker is not null)
+                {
+                    speaker.Stop();
+                    speaker.Dispose();
+                    speakerEngine?.Dispose();
+                    var written = File.Exists(recording) ? new FileInfo(recording).Length : 0;
+                    Console.WriteLine($"SOUND: {written / 1024} KB decoded out of the engine's stdout into {recording}");
+                    if (written < 64 * 1024) { Console.WriteLine("FAIL: no sound came through"); return 2; }
+                }
                 var frame = capture.TakeFrame();
                 if (frame is not null)
                 {
@@ -402,7 +482,21 @@ internal static class Program
                 throw new Exception("A video and a capture of the same shape were placed differently");
             if ((shared with { Anchor = "Bottom left" }).Fit(clip, screen).Location != new Point(0, 1080))
                 throw new Exception("Anchors do not reach the video path");
-            Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors, shared by video and capture");
+            // Sound rides the same input as the picture, because a card will not hand it over as a
+            // device of its own, and it leaves on stdout, which the picture is far too big for.
+            var silent = new CaptureOptions().Normalize();
+            var loud = (new CaptureOptions() with { Audio = "Live Gamer BOLT" }).Normalize();
+            var quietRun = silent.CreateStartInfo("Some Card", 150, "pipe");
+            var loudRun = loud.CreateStartInfo("Some Card", 150, "pipe");
+            var quietArgs = string.Join(" ", quietRun.ArgumentList);
+            var loudArgs = string.Join(" ", loudRun.ArgumentList);
+            if (silent.HasSound || quietArgs.Contains("audio=") || quietArgs.Contains("pipe:1") || quietRun.RedirectStandardOutput)
+                throw new Exception("A silent capture asked for sound anyway: " + quietArgs);
+            if (!loudArgs.Contains("video=Some Card:audio=Live Gamer BOLT")) throw new Exception("Sound was not asked for on the picture's own input: " + loudArgs);
+            if (!loudArgs.Contains("-map 0:a") || !loudArgs.Contains("-f wav pipe:1")) throw new Exception("Sound has nowhere to leave: " + loudArgs);
+            if (!loudRun.RedirectStandardOutput) throw new Exception("Nothing is listening on the engine's stdout");
+            if (!loudArgs.Contains("-map 0:v")) throw new Exception("The picture lost its own mapping once sound was added");
+            Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors, shared by video and capture, sound on one input");
             TestColors();
             using var control = new Control();
             using var idle = new Playback(control);
