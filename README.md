@@ -1,8 +1,7 @@
 # Wallcast
 
-<img width="3840" height="2160" alt="스크린샷 2026-09-20 015700" src="https://github.com/user-attachments/assets/d46da8b0-7133-4d29-8f7f-0bf254de44b0" />
+<img width="3840" height="2160" alt="스크린샷 2026-09-20 140240" src="https://github.com/user-attachments/assets/5054b539-527d-422a-bbba-d84a6cec4ea7" />
 
-<img width="1182" height="1936" alt="image" src="https://github.com/user-attachments/assets/16722787-99f9-4908-a52a-5589c6e0162b" />
 
 [한국어](README.ko.md)
 
