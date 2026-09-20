@@ -58,44 +58,10 @@ internal static class Program
                 {
                     box.SelectedItem = device;
                     Application.DoEvents();
-                    var rates = (ComboBox)Field("soundRate");
-                    var shown = rates.Items.Cast<string>().ToArray();
-                    var real = CaptureDevices.SoundRates(device).ToArray();
-                    // The rates have to be the device's own, not a list this app made up.
-                    if (silence.Enabled && real.Length > 0 && !shown.SequenceEqual(real))
-                        throw new Exception($"{device} offers {string.Join("/", real)} but the form shows {string.Join("/", shown)}");
-                    // The device heads its list with what it is receiving, so that is where to start.
-                    if (silence.Enabled && real.Length > 0 && rates.Text != real[0])
-                        throw new Exception($"{device} puts {real[0]} first but the form starts on {rates.Text}");
-                    if (silence.Enabled && (soundTip.GetToolTip(rates) ?? "").Length < 40)
-                        throw new Exception($"{device} leaves the rate unexplained");
                     var why = soundTip.GetToolTip(silence) ?? "";
                     if (why.Length < 40) throw new Exception($"{device} leaves the mute box unexplained: " + why);
                     if (!silence.Enabled && !why.Contains("no sound")) throw new Exception($"{device} greys the box out without saying so: " + why);
-                    Console.WriteLine($"PASS: {device} · mute {(silence.Enabled ? "live" : "greyed")} · rates {(shown.Length == 0 ? "none" : string.Join("/", shown))}{(silence.Enabled ? " (from the device)" : "")}");
-                }
-                // The fresh case, where nobody has picked a rate yet: the device's own first choice has
-                // to win even when the box is sitting on something else. Settings normally decide this,
-                // so it is driven here rather than by moving the user's file out of the way.
-                var picked = typeof(MainForm).GetField("rateChosen", hidden)!;
-                var rateBox = (ComboBox)Field("soundRate");
-                // The loop above left the box on the last device, which may be a silent one.
-                var withSound = box.Items.Cast<string>().FirstOrDefault(d => CaptureDevices.SoundRates(d).Count > 1);
-                var wanted = withSound is null ? [] : CaptureDevices.SoundRates(withSound).ToArray();
-                if (withSound is not null)
-                {
-                    box.SelectedItem = withSound;
-                    Application.DoEvents();
-                    rateBox.SelectedIndex = rateBox.Items.Count - 1;
-                    picked.SetValue(form, false);
-                    typeof(MainForm).GetMethod("UpdateSoundControls", hidden)!.Invoke(form, null);
-                    if (rateBox.Text != wanted[0]) throw new Exception($"With nothing chosen the rate should fall to {wanted[0]}, not {rateBox.Text}");
-                    // And a choice, once made, has to survive the next refresh.
-                    rateBox.SelectedIndex = rateBox.Items.Count - 1;
-                    var mine = rateBox.Text;
-                    typeof(MainForm).GetMethod("UpdateSoundControls", hidden)!.Invoke(form, null);
-                    if (rateBox.Text != mine) throw new Exception($"A chosen rate of {mine} was overruled with {rateBox.Text}");
-                    Console.WriteLine($"PASS: rate falls to the device's {wanted[0]} until chosen, then keeps {mine}");
+                    Console.WriteLine($"PASS: {device} · mute {(silence.Enabled ? "live" : "greyed")}");
                 }
                 return 0;
             }
@@ -225,7 +191,6 @@ internal static class Program
                     ?? CaptureDevices.Enumerate()[0];
                 var audible = CaptureDevices.EnumerateAudio();
                 Console.WriteLine($"DEVICES: {audible.Count} can send sound: {string.Join(", ", audible)}");
-                Console.WriteLine($"RATES: {device} offers {string.Join(", ", CaptureDevices.SoundRates(device))}");
                 var settings = new CaptureOptions(Audio: audible.Contains(device) ? device : "").Normalize();
                 if (!settings.HasSound) { Console.WriteLine($"SKIP: {device} sends no sound"); return 0; }
                 using var dispatcher = new Control();
@@ -529,16 +494,13 @@ internal static class Program
                 throw new Exception("A silent capture asked for sound anyway: " + quietArgs);
             if (!loudArgs.Contains("video=Some Card:audio=Live Gamer BOLT")) throw new Exception("Sound was not asked for on the picture's own input: " + loudArgs);
             if (!loudArgs.Contains("-map 0:a") || !loudArgs.Contains("-f wav pipe:1")) throw new Exception("Sound has nowhere to leave: " + loudArgs);
-            // Said out loud, both halves of it. Asking for a rate and not a channel count is worse than
-            // asking for nothing: the engine then takes the first pin format that fits, which on a card
-            // offering 7.1 is the eight channel one, and two channels arrive as eight.
-            if (!loudArgs.Contains("-channels 2") || !loudArgs.Contains("-sample_rate 44100"))
-                throw new Exception("The sound format was left to whatever the device listed first: " + loudArgs);
+            // Two channels asked for, and deliberately no rate: the device puts what it is receiving at
+            // the head of its format list, so saying nothing is how its own answer gets used. Saying
+            // nothing about the channels too would let a 7.1 card hand two channels over as eight.
+            if (!loudArgs.Contains("-channels 2")) throw new Exception("The sound layout was left to whatever the device listed first: " + loudArgs);
+            if (loudArgs.Contains("-sample_rate")) throw new Exception("A rate was forced on the device instead of taking its own: " + loudArgs);
             if (!loudArgs.Contains("-ac 2")) throw new Exception("Sound could reach the player in some layout it will not be played in: " + loudArgs);
-            if (quietArgs.Contains("-channels") || quietArgs.Contains("-sample_rate"))
-                throw new Exception("A silent capture negotiated a sound format: " + quietArgs);
-            if (!(loud with { SoundRate = "48000" }).Normalize().CreateStartInfo("Some Card", 150, "pipe").ArgumentList.Contains("48000"))
-                throw new Exception("The chosen sound rate never reached the engine");
+            if (quietArgs.Contains("-channels")) throw new Exception("A silent capture negotiated a sound format: " + quietArgs);
             if (!loudRun.RedirectStandardOutput) throw new Exception("Nothing is listening on the engine's stdout");
             if (!loudArgs.Contains("-map 0:v")) throw new Exception("The picture lost its own mapping once sound was added");
             Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors, shared by video and capture, sound on one input");

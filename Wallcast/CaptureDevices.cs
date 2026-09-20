@@ -24,25 +24,6 @@ internal static class CaptureDevices
         return names;
     }
 
-    // What one device's sound pin will actually accept. The engine prints the pin's formats even while
-    // refusing to open it, which is the only way to ask: a card carries its sound on a pin of the video
-    // device, so there is no audio device to query about it.
-    private static readonly Regex Offered = new(@"ch=\s*(?<ch>\d+), bits=\s*(?<bits>\d+), rate=\s*(?<rate>\d+)", RegexOptions.Compiled);
-
-    public static List<string> SoundRates(string device)
-    {
-        var rates = new List<string>();
-        if (string.IsNullOrWhiteSpace(device)) return rates;
-        foreach (Match match in Offered.Matches(Ask("-list_options", "true", "-f", "dshow", "-i", "audio=" + device)))
-        {
-            // Only the stereo layouts, because stereo is what is asked for and what is played.
-            if (match.Groups["ch"].Value != "2") continue;
-            var rate = match.Groups["rate"].Value;
-            if (!rates.Contains(rate)) rates.Add(rate);
-        }
-        return rates;
-    }
-
     // The engine answers on stderr and exits non-zero for every one of these questions, because it was
     // asked to list rather than to open something. Only the report matters.
     private static string Ask(params string[] arguments)

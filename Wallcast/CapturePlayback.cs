@@ -12,6 +12,8 @@ internal sealed class CapturePlayback : IDisposable
     // is not enough for 4K BGRA at 60fps (2.0 GB/s). Frames then queue up in the DirectShow buffer and
     // arrive seconds late. A named pipe carries the same stream at roughly twice the rate.
     private const int PipeBuffer = 4 << 20;
+    private static readonly System.Text.RegularExpressions.Regex SoundFormat =
+        new(@"Audio: [^,]+, (?<rate>\d+) Hz, (?<layout>[^,]+)", System.Text.RegularExpressions.RegexOptions.Compiled);
     private readonly Process process;
     private readonly NamedPipeServerStream pipe;
     private readonly CancellationTokenSource cancellation = new();
@@ -27,6 +29,8 @@ internal sealed class CapturePlayback : IDisposable
     public event Action? FrameReady;
     public CaptureOptions Options { get; }
     public string? InputDescription { get; private set; }
+    // What the sound pin was actually opened at, which is the device's answer rather than a request.
+    public string? SoundDescription { get; private set; }
     // The engine's stdout, carrying WAV, for whoever is going to play it. Null for a silent capture.
     public Stream? Sound => Options.HasSound ? process.StandardOutput.BaseStream : null;
 
@@ -43,6 +47,8 @@ internal sealed class CapturePlayback : IDisposable
         {
             if (string.IsNullOrWhiteSpace(e.Data)) return;
             if (InputDescription is null && e.Data.Contains("Video:")) InputDescription = e.Data.Trim();
+            if (SoundDescription is null && e.Data.Contains("Audio:") && SoundFormat.Match(e.Data) is { Success: true } sound)
+                SoundDescription = $"{sound.Groups["rate"].Value} Hz {sound.Groups["layout"].Value}";
             errors.Enqueue(e.Data);
             while (errors.Count > 12) errors.TryDequeue(out _);
         };

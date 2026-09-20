@@ -26,7 +26,7 @@ Video keeps its own shape and loops without a seam: the player repeats the file 
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Input HDR / peak | **SDR**, HDR10 / PQ → SDR, HLG → SDR · **1000** nits |
-| Sound / rate | taken from the device's own audio pin when it has one · **muted** · the rates that device offers, **its own first choice** |
+| Sound | taken from the device's own audio pin when it has one, in whatever format the device is sending · **muted** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
@@ -49,19 +49,25 @@ asking for a rate and not a channel count is worse than asking for nothing at al
 offers 7.1, the first format matching `48000` is the eight channel one, and two channels then arrive
 as eight. Two channels are asked for explicitly, and the rate with them.
 
-**Sound rate** lists what that device's pin actually offers, read off the device rather than made up
-here, and it starts on the device's own first choice. That first entry is worth trusting: a card
-reorders its list as the incoming signal changes, so the head of it is usually what it is receiving
-right now. Once you pick a rate yourself it is kept.
+There is no sample rate to choose, on purpose. The engine is asked for two channels and told nothing
+about the rate, and it then takes the first format the pin offers - which is the one the device puts
+at the head of its own list, and a card reorders that list as the incoming signal changes. Saying
+nothing is how the device's answer gets used. Observed on a Live Gamer BOLT (GC555): a 44.1kHz source
+puts 44100 at the head and 48000 second, and a 96kHz source, which the card converts down, puts 48000
+there instead. Both were then opened at exactly that rate.
 
-The rate has to match what the device really sends, and a mismatch plays at the wrong speed rather
-than failing outright, which is what wrong-sounding capture audio usually turns out to be. Measured on
-a Live Gamer BOLT (GC555) with a 44.1kHz source: opened at 48000 it kept sending 44100 samples a
-second under the 48000 label, so ten seconds of sound arrived in 9.19 - 8.8% fast, exactly 44100/48000.
-The same card fed 96kHz converts down and is right at 48000, and 96000 never appears in the list
-because the pin does not offer it. Nothing here compensates for any of that. The device is the only
-thing that knows what it is sending, it says so by what it lists first, and a correction built for one
-card would be wrong on every card that does not need it.
+The channel count is the one thing that does have to be said, because leaving it out lets the engine
+take the first format overall, and on a card that also offers 7.1 that can be the eight channel one.
+Two channels arriving as eight is most of what "the sound is wrong" turns out to mean.
+
+Getting the rate wrong plays at the wrong speed rather than failing outright. Measured on the same card
+with a 44.1kHz source, forced to 48000: it kept sending 44100 samples a second under the 48000 label,
+so ten seconds of sound arrived in 9.19 - 8.8% fast, exactly 44100/48000. Nothing here compensates for
+that, which is why the rate is the device's to state rather than anyone's to pick.
+
+The format settles when playback starts. A source that changes its rate afterwards - one track at
+44.1kHz and the next at 48kHz - is not followed, because the sound shares its input with the picture
+and re-opening one re-opens both. Press **Apply to desktop** again and it is taken afresh.
 
 The picture and the sound travel separately, so they are not locked together to the sample. The sound
 is buffered by the capture buffer value, the same dial that trades latency for a steady picture.
@@ -227,11 +233,11 @@ assumption: a capture card will not hand its sound over as a device of its own, 
 for on the same input as the picture, and OBS's virtual camera has no sound at all - it registers no
 audio device to go with the camera - so the checkbox greys out and says so.
 
-The sound format is now stated in full, two channels and a rate, because asking for a rate alone let
-the engine pick the pin's eight channel layout. The rates offered come from the device itself and start
-on whichever it lists first, which tracks the signal it is receiving. Measured on the same card with a
-44.1kHz source: opened at 48000 it sends 44100 under that label, 8.8% fast. That is left uncorrected
-and documented, because only the device knows what it is really sending.
+Two channels are asked for and the rate deliberately is not, so the device's own current format is the
+one used - confirmed both ways on a Live Gamer BOLT, 44100 for a 44.1kHz source and 48000 for a 96kHz
+one it converts down. Asking for a rate without a channel count had let the engine pick the pin's eight
+channel layout instead. Forcing a rate the device is not sending plays 8.8% fast rather than failing,
+measured, and is left uncorrected: only the device knows what it is sending.
 
 2026-09-20, 1.1.0, video parity. The video path caught up with capture. It takes the same output resolution,
 mapping and screen position, placed by the same arithmetic against the shape the file turns out to be,

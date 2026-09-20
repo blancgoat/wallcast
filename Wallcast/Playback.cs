@@ -48,7 +48,7 @@ internal sealed class Playback : IDisposable
                 host.Attach(screen, area);
                 capture = new CapturePlayback(device.Device, device.CacheMilliseconds, options);
                 capture.Started += () => Post(current, () => Status?.Invoke($"Playing · {options.Format} / {options.ColorSpace} / {options.DynamicRange} / {options.Resolution} / {options.Fps}fps"
-                    + (options.HasSound ? $" · sound from {options.Audio} at {options.SoundRate}Hz" : "")));
+                    + (options.HasSound ? " · sound " + (capture?.SoundDescription ?? "from " + options.Audio) : "")));
                 capture.Failed += detail => Post(current, () =>
                 {
                     // A device that turns out not to hand over the audio it was asked for must not cost

@@ -8,7 +8,7 @@ internal sealed record CaptureOptions(
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000",
     string CustomSize = "1920x1080", string CustomMode = "Fill, cropping the overflow", string Anchor = "Center",
-    string Audio = "", string SoundRate = "44100")
+    string Audio = "")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
@@ -17,14 +17,6 @@ internal sealed record CaptureOptions(
     public static readonly string[] ColorRanges = ["Limited", "Full"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
-    // What the sound pin is opened at. It has to be said out loud, like every other input format here:
-    // a card offers several and the engine would otherwise take whichever it happens to list first.
-    // The choices come from the device, so this is only what to show before one has been asked.
-    public static readonly string[] SoundRates = ["44100", "48000", "32000"];
-    // Any rate a device might offer, rather than only the ones listed above: the list is the device's
-    // to decide, and rejecting a rate it named would be this app overruling the thing it is reading.
-    public static string CleanRate(string? rate) =>
-        int.TryParse(rate, out var hertz) && hertz >= 8000 && hertz <= 768000 ? hertz.ToString() : SoundRates[0];
 
     public CaptureOptions Normalize()
     {
@@ -41,8 +33,7 @@ internal sealed record CaptureOptions(
             DynamicRanges.Contains(DynamicRange) ? DynamicRange : DynamicRanges[0],
             HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
             layout.CustomSize, layout.CustomMode, layout.Anchor,
-            (Audio ?? "").Trim(),
-            CleanRate(SoundRate));
+            (Audio ?? "").Trim());
     }
 
     // An audio device the engine named, or empty for a silent capture. It is kept apart from the video
@@ -109,15 +100,13 @@ internal sealed record CaptureOptions(
         string[] args = ["-hide_banner", "-y", "-loglevel", "info", "-nostdin", "-f", "dshow", "-rtbufsize", bytes.ToString(),
             "-video_size", Resolution, "-framerate", Fps];
         foreach (var arg in args) info.ArgumentList.Add(arg);
-        // Both halves of the sound format, because asking for only the rate is worse than asking for
-        // nothing: the engine takes the first pin format that matches, and on a card that offers 7.1
-        // that is the eight channel one. Two channels arriving as eight is most of what "the sound is
+        // Two channels, and deliberately no rate. The engine takes the first pin format that matches
+        // what it was asked for, and a card puts what it is receiving at the head of that list, so
+        // saying nothing about the rate is how the device's own answer is used. Saying nothing about
+        // the channels too would be worse: on a card that also offers 7.1 the first format overall can
+        // be the eight channel one, and two channels arriving as eight is most of what "the sound is
         // wrong" turns out to mean.
-        if (HasSound)
-        {
-            info.ArgumentList.Add("-channels"); info.ArgumentList.Add("2");
-            info.ArgumentList.Add("-sample_rate"); info.ArgumentList.Add(SoundRate);
-        }
+        if (HasSound) { info.ArgumentList.Add("-channels"); info.ArgumentList.Add("2"); }
         if (Format == "MJPEG") { info.ArgumentList.Add("-vcodec"); info.ArgumentList.Add("mjpeg"); }
         else
         {
