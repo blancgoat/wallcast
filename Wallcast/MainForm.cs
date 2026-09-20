@@ -59,6 +59,12 @@ internal sealed class MainForm : Form
 
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer watchdog = new() { Interval = 2000 };
+    // A FlowLayoutPanel that scrolls itself settles how far it scrolls before its AutoSize children
+    // have finished growing, and the last of them ends up below a bottom the panel believes it has
+    // already reached. One that only grows, inside a plain panel that only scrolls, has no such
+    // argument with itself: the inner one reports its real height and the outer one scrolls to it.
+    private readonly Panel scroller = new() { Dock = DockStyle.Fill, AutoScroll = true };
+    private readonly FlowLayoutPanel body = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28) };
     private Playback? playback;
     private bool exiting;
     private Screen[] screens = [];
@@ -74,8 +80,8 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(580, 660);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(246, 247, 250);
-        var body = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28), AutoScroll = true };
-        Controls.Add(body);
+        Controls.Add(scroller);
+        scroller.Controls.Add(body);
         body.Controls.Add(new Label { Text = "Wallcast", Font = new Font("Segoe UI", 28, FontStyle.Bold), AutoSize = true });
         body.Controls.Add(new Label { Text = "Any screen, as your wallpaper.", AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
         body.Controls.Add(Caption("Input source"));
@@ -189,6 +195,9 @@ internal sealed class MainForm : Form
             if (!exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
         };
         FormClosed += (_, _) => { watchdog.Dispose(); playback?.Dispose(); tray.Dispose(); };
+        // The status line is the last thing in the window and the one that grows: an error or a
+        // After the children are arranged, not before: that is the only moment their real heights
+        // are known, and it is the growing of one of them that made the old extent too short.
         watchdog.Tick += (_, _) =>
         {
             var current = Screen.AllScreens;
@@ -203,6 +212,9 @@ internal sealed class MainForm : Form
         ResumeLayout(true);
     }
 
+    // A FlowLayoutPanel settles how far it scrolls before its AutoSize children have finished
+    // growing, so the last of them can sit below the bottom of a panel that believes it has nothing
+    // left to show. Measuring the children and saying so outright is what makes the bottom reachable.
     // Build every row at the same DPI, including rows initially hidden by the source selector.
     private static void ScaleGeometry(Control control, float factor)
     {

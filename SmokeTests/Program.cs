@@ -24,6 +24,16 @@ internal static class Program
                 // the reason hangs on the grid behind the cells and on the caption beside them.
                 var tips = (ToolTip)typeof(MainForm).GetField("anchorTips", hidden)!.GetValue(form)!;
                 var cells = (RadioButton[])typeof(MainForm).GetField("anchorCells", hidden)!.GetValue(form)!;
+                // Everything has to be reachable. A window that scrolls is no use if it cannot scroll
+                // as far as its own last control, and the status line is the last thing in it.
+                var scroller = (Panel)form.Controls[0];
+                var panel = (FlowLayoutPanel)scroller.Controls[0];
+                var last = panel.Controls.Cast<Control>().Where(c => c.Visible).OrderBy(c => c.Bottom).Last();
+                var reach = scroller.DisplayRectangle.Height;
+                Console.WriteLine($"LAYOUT: window shows {scroller.ClientSize.Height}, scrolls to {reach}, " +
+                    $"contents {panel.Height} ending at {last.Bottom}, scrollbar {(scroller.VerticalScroll.Visible ? "shown" : "absent")}");
+                if (last.Bottom + panel.Top > reach) throw new Exception($"The window cannot scroll to its own last control: it ends at {last.Bottom + panel.Top} and scrolling stops at {reach}");
+                if (reach > scroller.ClientSize.Height && !scroller.VerticalScroll.Visible) throw new Exception("There is more content than fits and no scrollbar to reach it");
                 var chooser = (ComboBox)Field("mode");
                 var soundTip = (ToolTip)typeof(MainForm).GetField("soundTip", hidden)!.GetValue(form)!;
                 if (!tips.ShowAlways) throw new Exception("Tooltips would stay hidden unless the window is active");
