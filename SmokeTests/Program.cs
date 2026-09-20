@@ -494,6 +494,16 @@ internal static class Program
                 throw new Exception("A silent capture asked for sound anyway: " + quietArgs);
             if (!loudArgs.Contains("video=Some Card:audio=Live Gamer BOLT")) throw new Exception("Sound was not asked for on the picture's own input: " + loudArgs);
             if (!loudArgs.Contains("-map 0:a") || !loudArgs.Contains("-f wav pipe:1")) throw new Exception("Sound has nowhere to leave: " + loudArgs);
+            // Said out loud, both halves of it. Asking for a rate and not a channel count is worse than
+            // asking for nothing: the engine then takes the first pin format that fits, which on a card
+            // offering 7.1 is the eight channel one, and two channels arrive as eight.
+            if (!loudArgs.Contains("-channels 2") || !loudArgs.Contains("-sample_rate 44100"))
+                throw new Exception("The sound format was left to whatever the device listed first: " + loudArgs);
+            if (!loudArgs.Contains("-ac 2")) throw new Exception("Sound could reach the player in some layout it will not be played in: " + loudArgs);
+            if (quietArgs.Contains("-channels") || quietArgs.Contains("-sample_rate"))
+                throw new Exception("A silent capture negotiated a sound format: " + quietArgs);
+            if (!(loud with { SoundRate = "48000" }).Normalize().CreateStartInfo("Some Card", 150, "pipe").ArgumentList.Contains("48000"))
+                throw new Exception("The chosen sound rate never reached the engine");
             if (!loudRun.RedirectStandardOutput) throw new Exception("Nothing is listening on the engine's stdout");
             if (!loudArgs.Contains("-map 0:v")) throw new Exception("The picture lost its own mapping once sound was added");
             Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors, shared by video and capture, sound on one input");

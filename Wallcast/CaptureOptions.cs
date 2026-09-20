@@ -8,7 +8,7 @@ internal sealed record CaptureOptions(
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000",
     string CustomSize = "1920x1080", string CustomMode = "Fill, cropping the overflow", string Anchor = "Center",
-    string Audio = "")
+    string Audio = "", string SoundRate = "44100")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
@@ -17,6 +17,9 @@ internal sealed record CaptureOptions(
     public static readonly string[] ColorRanges = ["Limited", "Full"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
+    // What the sound pin is opened at. It has to be said out loud, like every other input format here:
+    // a card offers several and the engine would otherwise take whichever it happens to list first.
+    public static readonly string[] SoundRates = ["44100", "48000", "32000"];
 
     public CaptureOptions Normalize()
     {
@@ -33,7 +36,8 @@ internal sealed record CaptureOptions(
             DynamicRanges.Contains(DynamicRange) ? DynamicRange : DynamicRanges[0],
             HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
             layout.CustomSize, layout.CustomMode, layout.Anchor,
-            (Audio ?? "").Trim());
+            (Audio ?? "").Trim(),
+            SoundRates.Contains(SoundRate) ? SoundRate : SoundRates[0]);
     }
 
     // An audio device the engine named, or empty for a silent capture. It is kept apart from the video
@@ -100,6 +104,15 @@ internal sealed record CaptureOptions(
         string[] args = ["-hide_banner", "-y", "-loglevel", "info", "-nostdin", "-f", "dshow", "-rtbufsize", bytes.ToString(),
             "-video_size", Resolution, "-framerate", Fps];
         foreach (var arg in args) info.ArgumentList.Add(arg);
+        // Both halves of the sound format, because asking for only the rate is worse than asking for
+        // nothing: the engine takes the first pin format that matches, and on a card that offers 7.1
+        // that is the eight channel one. Two channels arriving as eight is most of what "the sound is
+        // wrong" turns out to mean.
+        if (HasSound)
+        {
+            info.ArgumentList.Add("-channels"); info.ArgumentList.Add("2");
+            info.ArgumentList.Add("-sample_rate"); info.ArgumentList.Add(SoundRate);
+        }
         if (Format == "MJPEG") { info.ArgumentList.Add("-vcodec"); info.ArgumentList.Add("mjpeg"); }
         else
         {
@@ -112,8 +125,10 @@ internal sealed record CaptureOptions(
             "-map", "0:v", "-an", "-sn", "-dn", "-vf", ConversionFilter,
             "-fps_mode", "passthrough", "-threads", "2", "-f", "rawvideo", "-pix_fmt", "bgra", output }) info.ArgumentList.Add(arg);
         // Uncompressed, because the player is in the same box and anything else would only cost latency.
+        // The channel count is pinned again on the way out, so a device that could only be opened in
+        // some other layout still reaches the player as the stereo it will be played as.
         if (HasSound)
-            foreach (var arg in new[] { "-map", "0:a", "-vn", "-c:a", "pcm_s16le", "-f", "wav", "pipe:1" })
+            foreach (var arg in new[] { "-map", "0:a", "-vn", "-ac", "2", "-c:a", "pcm_s16le", "-f", "wav", "pipe:1" })
                 info.ArgumentList.Add(arg);
         return info;
     }

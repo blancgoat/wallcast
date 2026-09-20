@@ -50,6 +50,7 @@ internal sealed class MainForm : Form
     private readonly Label geometry = new() { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0), Margin = new Padding(0, 8, 0, 0) };
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
+    private readonly ComboBox soundRate = Choice(CaptureOptions.SoundRates);
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer watchdog = new() { Interval = 2000 };
     private Playback? playback;
@@ -91,6 +92,7 @@ internal sealed class MainForm : Form
         AddCaptureSetting("Color range", colorRange);
         AddCaptureSetting("Input HDR", dynamicRange);
         AddCaptureSetting("HDR peak (nits)", hdrPeak);
+        AddCaptureSetting("Sound rate (Hz)", soundRate);
         AddLayoutSetting("Display aspect", aspect);
         AddLayoutSetting("Output size (W x H)", customSize);
         AddLayoutSetting("Output mapping", customMode);
@@ -282,6 +284,7 @@ internal sealed class MainForm : Form
     {
         var available = !Capturing || DeviceHasSound;
         mute.Enabled = available;
+        soundRate.Enabled = Capturing && DeviceHasSound;
         var reason = available
             ? "Clear this to hear the input. Capture takes the sound the device sends alongside the picture."
             : "This device sends a picture and no sound, so there is nothing to unmute. A virtual camera has no sound of its own; route it through a virtual audio device and capture that instead.";
@@ -364,7 +367,7 @@ internal sealed class MainForm : Form
     // taken whenever the device offers it and silenced by Mute, which keeps the toggle instant: asking
     // the engine for it only on demand would mean restarting the capture every time it is clicked.
     private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor,
-        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "");
+        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "", soundRate.Text);
     private Placement SelectedPlacement() => new Placement(aspect.Text, customSize.Text, customMode.Text, SelectedAnchor).Normalize();
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)
@@ -450,6 +453,7 @@ internal sealed class MainForm : Form
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
             customSize.Text = options.CustomSize; customMode.SelectedItem = options.CustomMode;
+            soundRate.SelectedItem = options.SoundRate;
             foreach (var cell in anchorCells) cell.Checked = (string?)cell.Tag == options.Anchor;
             UpdateAspectControls();
         }
