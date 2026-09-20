@@ -82,8 +82,6 @@ internal sealed class MainForm : Form
         BackColor = Color.FromArgb(246, 247, 250);
         Controls.Add(scroller);
         scroller.Controls.Add(body);
-        body.Controls.Add(new Label { Text = "Wallcast", Font = new Font("Segoe UI", 28, FontStyle.Bold), AutoSize = true });
-        body.Controls.Add(new Label { Text = "Any screen, as your wallpaper.", AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
         body.Controls.Add(Caption("Input source"));
         mode.Items.AddRange(Modes);
         mode.Width = 490;
