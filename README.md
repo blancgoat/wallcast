@@ -26,7 +26,7 @@ Video keeps its own shape and loops without a seam: the player repeats the file 
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Input HDR / peak | **SDR**, HDR10 / PQ → SDR, HLG → SDR · **1000** nits |
-| Sound | **Off**, On, On following the source, On following closely |
+| Sound | **Don't use sound** / Use sound · Track the source's sample rate |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
@@ -34,20 +34,22 @@ For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited /
 
 ### Sound
 
-Everything starts silent. **Sound** is one setting, because muting an input while still asking the
-device how its sound is doing was two knobs describing one intention:
+Nothing uses sound until you say so. **Don't use sound** is not a mute: the device is asked for no
+audio at all, so nothing is captured and nothing is spent, which is why it reads as not using sound
+rather than turning it down.
 
-- `Off` asks the device for no sound at all. Nothing is captured, nothing is watched, nothing is spent.
-- `On` takes the sound the device is sending when you press Apply. It still re-opens itself when the
-  sound starts arriving at a rate that plainly disagrees with what the pin claims, because counting
-  what arrives costs nothing; it does not catch a card that quietly resamples instead.
-- `On, following the source` also asks the device what it is receiving, which is the only way to see
-  that hidden case, settling within four seconds.
-- `On, following closely` does the same within one second, for a source that changes rate track by
-  track.
+**Use sound** takes what the device is sending when you press Apply. It still re-opens itself when the
+sound starts arriving at a rate that plainly disagrees with what the pin claims, because counting what
+arrives costs nothing to do.
 
-A video file gets only the first two: a file on disk does not change its mind halfway through, and its
-setting takes effect where it stands rather than on Apply.
+**Track the source's sample rate** is the checkbox under it, and it exists for sources that change rate
+from one track to the next - an iPhone or iPad holding its audio device exclusively is the usual one.
+It asks the device what it is receiving, which is the only way to see a card quietly resampling to the
+rate its pin was opened at, and settles within about a second. That costs a little; the paragraph after
+next says how much.
+
+A video file gets the radio and not the checkbox: a file on disk keeps the rate it was encoded at. Its
+setting also takes effect where it stands rather than on Apply.
 
 A capture device's sound comes off the device itself, on a pin beside the picture, and there is nothing
 separate to choose: it is taken whenever the device offers any and silenced by the checkbox, which is
@@ -84,30 +86,30 @@ sound shares its input with the picture that re-opens both: the picture freezes 
 about a second and a half. It does not go black or show the wallpaper through, because the window and
 its swap chain stay where they are and only the engine underneath is replaced.
 
-The two following settings differ in how often they ask: every two seconds, or every four hundred
-milliseconds, both acting on two answers in a row so that a track boundary is not mistaken for a change.
-Following closely is worth it when the source changes rate track by track, because it is the stretch
-before the re-open that sounds wrong and this shortens it fivefold. The second and a half of frozen
-picture belongs to the re-open itself and no setting shortens it.
+Tracking asks every four hundred milliseconds and acts on two answers in a row, so that a track
+boundary, where a device can sit between rates for a moment, is not mistaken for a change. An ask means
+building a DirectShow filter, measured at **8.2ms** on one background thread: under two percent of one
+core. Holding the filter between asks would make it a hundred times cheaper and was tried; it does not
+work, because a driver settles its format list when the filter is built and a kept one goes on
+answering about the signal that was arriving when it was kept - it updates eventually, long afterwards,
+which is worse than not updating at all.
 
-An ask means building a DirectShow filter, measured at **8.2ms** on one background thread, so following
-costs under half a percent of a core and following closely under two. Holding the filter between asks
-would make it a hundred times cheaper and was tried; it does not work, because a driver settles its
-format list when the filter is built and a kept one goes on answering about the signal that was arriving
-when it was kept - it updates eventually, hours apart, which is worse than not updating at all.
+A middle setting that asked every two seconds used to sit between on and tracking. It was one number's
+difference and nobody would have chosen it knowingly, so it is gone; anything saved under it is read as
+tracking rather than silently turned off.
 
 Two things say that the source has changed, and they are what the settings above are choosing between.
 
 What arrives per second stops matching the rate the pin claims. That catches a source dropping below
 the rate the pin was opened at, where the card does not resample upwards and simply sends fewer samples
 under the old label - 8.8% slow, between 44.1kHz and 48kHz. The bytes are already in hand, so this is
-free, and it runs whenever there is sound at all.
+free, and it runs whenever sound is in use at all.
 
 The device's own format list, which it reorders to put what it is receiving first and will answer while
-it is being captured. This is the one the following settings add, and it is the only one that sees the
-other half of the problem: a card that resamples to the rate its pin was opened at sends exactly as
-many bytes a second as it should while making a mess of the sound, so nothing about the bytes gives it
-away. A device that will not answer is not asked again.
+it is being captured. This is the one the checkbox adds, and it is the only one that sees the other half
+of the problem: a card that resamples to the rate its pin was opened at sends exactly as many bytes a
+second as it should while making a mess of the sound, so nothing about the bytes gives it away. A device
+that will not answer is not asked again.
 
 Measured on a Live Gamer BOLT across 44.1kHz, 48kHz and 96kHz sources: three changes, three re-opens,
 1.6s, 1.5s and 1.7s of frozen picture, no false alarm in between. A 96kHz source needs no re-open when

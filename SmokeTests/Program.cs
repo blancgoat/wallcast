@@ -56,11 +56,11 @@ internal static class Program
                 {
                     if (Longest(text) > 100) throw new Exception($"The {what} explanation runs {Longest(text)} characters before breaking");
                 }
-                var silence = (ComboBox)Field("sound");
+                var silence = (RadioButton)Field("soundOn");
                 chooser.SelectedIndex = 1;
                 Application.DoEvents();
-                if (!silence.Enabled) throw new Exception("A video file always has sound to turn on or off");
-                if (silence.Items.Count != CaptureOptions.FileSounds.Length) throw new Exception("A video file was offered settings only a device can use");
+                if (!silence.Enabled) throw new Exception("A video file always has sound to use or not");
+                if (Field("trackRow").Visible) throw new Exception("A video file was offered tracking, which only a device needs");
                 chooser.SelectedIndex = 0;
                 var box = (ComboBox)Field("devices");
                 foreach (string device in box.Items)
@@ -71,8 +71,18 @@ internal static class Program
                     if (why.Length < 40) throw new Exception($"{device} leaves the sound setting unexplained: " + why);
                     Readable(device + " sound", why);
                     if (!silence.Enabled && !why.Contains("no sound")) throw new Exception($"{device} greys the setting out without saying so: " + why);
-                    if (silence.Enabled && silence.Items.Count != CaptureOptions.Sounds.Length) throw new Exception($"{device} was not offered every sound setting");
-                    Console.WriteLine($"PASS: {device} · sound {(silence.Enabled ? "live with " + silence.Items.Count + " settings" : "greyed")}" +
+                    var tracking = (CheckBox)Field("soundTrack");
+                    var quiet = (RadioButton)Field("soundOff");
+                    if (!Field("trackRow").Visible) throw new Exception($"{device} was not offered tracking at all");
+                    // Tracking is about sound, so it waits until there is some to track. Driven rather
+                    // than assumed, because whatever was saved last decides where the form starts.
+                    quiet.PerformClick();
+                    if (tracking.Enabled) throw new Exception($"{device} offered tracking with sound not in use");
+                    Readable(device + " tracking off", soundTip.GetToolTip(tracking) ?? "");
+                    silence.PerformClick();
+                    if (tracking.Enabled != silence.Enabled) throw new Exception($"{device} did not follow the sound choice into tracking");
+                    if (silence.Enabled) Readable(device + " tracking on", soundTip.GetToolTip(tracking) ?? "");
+                    Console.WriteLine($"PASS: {device} · sound {(silence.Enabled ? "live" : "greyed")}" +
                         $" · explanation {why.Split(Environment.NewLine).Length} lines, longest {Longest(why)}");
                 }
                 return 0;
@@ -240,7 +250,7 @@ internal static class Program
                 var audible = CaptureDevices.EnumerateAudio();
                 Console.WriteLine($"DEVICES: {audible.Count} can send sound: {string.Join(", ", audible)}");
                 var settings = new CaptureOptions(Audio: audible.Contains(device) ? device : "",
-                    Sound: args.Contains("--eager") ? CaptureOptions.SoundClosely : CaptureOptions.SoundFollowing).Normalize();
+                    Sound: args.Contains("--quiet") ? CaptureOptions.SoundOn : CaptureOptions.SoundClosely).Normalize();
                 if (args.Contains("--follow")) Console.WriteLine($"FOLLOW: {settings.Sound}, asking every {settings.Watch.Every}ms, acting after {settings.Watch.Before}");
                 if (!settings.HasSound) { Console.WriteLine($"SKIP: {device} sends no sound"); return 0; }
                 using var dispatcher = new Control();
@@ -583,19 +593,16 @@ internal static class Program
             if (off.HasSound || off.Following) throw new Exception("Off did not turn it off");
             if (off.CreateStartInfo("Some Card", 150, "pipe").ArgumentList.Contains("-channels"))
                 throw new Exception("Off still negotiated a sound format");
-            var keepingUp = (loud with { Sound = CaptureOptions.SoundFollowing }).Normalize();
             var closely = (loud with { Sound = CaptureOptions.SoundClosely }).Normalize();
-            if (!keepingUp.Following || !closely.Following) throw new Exception("The following settings were not following");
-            // A file has no device to change its mind, so it is offered only the two that mean anything.
-            if (CaptureOptions.FileSounds.Length != 2 || CaptureOptions.FileSounds[0] != CaptureOptions.SoundOff)
-                throw new Exception("A video file should be offered only off and on");
-            var relaxed = keepingUp.Watch;
-            var eager = closely.Watch;
-            if (relaxed.Every <= eager.Every) throw new Exception("Eager is not more eager than relaxed");
-            // Eager has to settle inside the second and a half the re-open itself takes, or it is not
-            // buying anything; relaxed only has to stay in the same order of magnitude as a track.
-            if (eager.Every * eager.Before > 1000 || relaxed.Every * relaxed.Before > 5000)
-                throw new Exception($"Settling takes {eager.Every * eager.Before}ms eager, {relaxed.Every * relaxed.Before}ms relaxed");
+            if (!closely.Following) throw new Exception("Tracking the source was not tracking it");
+            // The middle setting is gone; anything saved under it reads as the one that replaced it
+            // rather than as no sound at all.
+            if ((loud with { Sound = "On, following the source" }).Normalize().Sound != CaptureOptions.SoundClosely)
+                throw new Exception("A setting saved under the retired middle option was thrown away");
+            // Settling has to happen inside the second and a half the re-open itself takes, or the
+            // asking is not buying anything.
+            var pace = closely.Watch;
+            if (pace.Every * pace.Before > 1000) throw new Exception($"Settling takes {pace.Every * pace.Before}ms");
             if (!loudRun.RedirectStandardOutput) throw new Exception("Nothing is listening on the engine's stdout");
             if (!loudArgs.Contains("-map 0:v")) throw new Exception("The picture lost its own mapping once sound was added");
             Console.WriteLine("PASS: output resolution, fill/fit/centre/stretch, anchors, shared by video and capture, sound on one input");

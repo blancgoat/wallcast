@@ -17,25 +17,24 @@ internal sealed record CaptureOptions(
     public static readonly string[] ColorRanges = ["Limited", "Full"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
-    // One setting for the whole of sound, because muting while still following the source was two
-    // knobs describing one intention. It reads as how much you want: nothing at all, which asks the
-    // device for no audio and costs nothing; sound as the device gave it when Apply was pressed; or
-    // sound that keeps up with a source changing its sample rate between tracks, at the price of
-    // asking the device how it is doing, every two seconds or every four hundred milliseconds.
-    public const string SoundOff = "Off", SoundOn = "On", SoundFollowing = "On, following the source",
-        SoundClosely = "On, following closely";
-    public static readonly string[] Sounds = [SoundOff, SoundOn, SoundFollowing, SoundClosely];
-    // The two a video file can make sense of; the rest are about a device changing its mind.
-    public static readonly string[] FileSounds = [SoundOff, SoundOn];
+    // Whether sound is used at all, and whether the device is asked how it is doing. Off is not a
+    // mute: the device is asked for no audio, so nothing is captured and nothing is spent, which is
+    // why it reads as not using sound rather than turning it down.
+    public const string SoundOff = "Off", SoundOn = "On", SoundClosely = "On, following closely";
+    public static readonly string[] Sounds = [SoundOff, SoundOn, SoundClosely];
+    // A middle setting that asked the device every two seconds used to sit between these. It was one
+    // number's difference from the close one and nobody would have chosen it knowingly, so anything
+    // saved under it is read as the close one rather than silently turned off.
+    private const string Retired = "On, following the source";
     // Interval, and how many asks in a row have to disagree, two being enough to sit out the moment a
     // device spends between rates at a track boundary. An ask means building a filter, about eight
-    // milliseconds of one background thread, so the close setting is four hundred milliseconds rather
-    // than the hundred it could be if the answer could be cached - it cannot, because a driver settles
-    // its list when the filter is built and a kept one goes on answering about the old signal.
+    // milliseconds of one background thread, so four hundred milliseconds rather than the hundred it
+    // could be if the answer could be cached - it cannot, because a driver settles its format list
+    // when the filter is built and a kept one goes on answering about the old signal.
     [System.Text.Json.Serialization.JsonIgnore]
-    public (int Every, int Before) Watch => Sound == SoundClosely ? (400, 2) : (2000, 2);
+    public (int Every, int Before) Watch => (400, 2);
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool Following => HasSound && Sound is SoundFollowing or SoundClosely;
+    public bool Following => HasSound && Sound == SoundClosely;
 
     public CaptureOptions Normalize()
     {
@@ -53,7 +52,7 @@ internal sealed record CaptureOptions(
             HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
             layout.CustomSize, layout.CustomMode, layout.Anchor,
             (Audio ?? "").Trim(),
-            Sounds.Contains(Sound) ? Sound : SoundOff);
+            Sound == Retired ? SoundClosely : Sounds.Contains(Sound) ? Sound : SoundOff);
     }
 
     // An audio device the engine named, or empty for a silent capture. It is kept apart from the video

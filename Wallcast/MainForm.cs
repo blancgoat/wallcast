@@ -12,9 +12,13 @@ internal sealed class MainForm : Form
     private readonly ComboBox devices = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox monitors = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly NumericUpDown cache = new() { Minimum = 50, Maximum = 2000, Increment = 50, Value = 150 };
-    // One control for the whole of sound. Muting while still following a source that changes rate was
-    // two settings saying different things about the same intention.
-    private readonly ComboBox sound = Choice(CaptureOptions.Sounds);
+    // Whether sound is used at all. Not a mute: off means the device is asked for none, so the wording
+    // is about using it rather than turning it down. AutoCheck is off for the same reason it is off on
+    // the anchor grid - it hands the choice to whichever button the form happens to focus first.
+    private readonly RadioButton soundOff = new() { Text = "Don't use sound", AutoCheck = false, AutoSize = true, Checked = true, Margin = new Padding(0, 4, 18, 0) };
+    private readonly RadioButton soundOn = new() { Text = "Use sound", AutoCheck = false, AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
+    private readonly CheckBox soundTrack = new() { Text = "Track the source's sample rate", AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
+    private readonly FlowLayoutPanel trackRow = Row();
     // A disabled control gets no mouse messages, so the reason it is disabled has to hang on a parent.
     private readonly FlowLayoutPanel soundRow = Row();
     private readonly ToolTip soundTip = new() { ShowAlways = true, AutoPopDelay = 15000, InitialDelay = 350 };
@@ -138,12 +142,23 @@ internal sealed class MainForm : Form
         body.Controls.Add(Caption("Output monitor"));
         monitors.Width = 490;
         body.Controls.Add(monitors);
-        soundRow.Margin = new Padding(0, 14, 0, 10);
+        soundRow.Margin = new Padding(0, 14, 0, 0);
         soundRow.Controls.Add(new Label { Text = "Sound", AutoSize = true, Padding = new Padding(0, 5, 14, 0) });
-        sound.Width = 380;
-        soundRow.Controls.Add(sound);
+        soundRow.Controls.Add(soundOff);
+        soundRow.Controls.Add(soundOn);
         body.Controls.Add(soundRow);
-        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · sound starts off and is one setting", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
+        trackRow.Margin = new Padding(52, 2, 0, 10);
+        trackRow.Controls.Add(soundTrack);
+        body.Controls.Add(trackRow);
+        foreach (var button in new[] { soundOff, soundOn })
+            button.Click += (sender, _) =>
+            {
+                soundOff.Checked = ReferenceEquals(sender, soundOff);
+                soundOn.Checked = ReferenceEquals(sender, soundOn);
+                UpdateSoundControls();
+                if (!Capturing) playback?.SetMute(soundOff.Checked);
+            };
+        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · sound is not used until you say so", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
         actions.Controls.Add(Button("Apply to desktop", Apply));
@@ -155,9 +170,7 @@ internal sealed class MainForm : Form
         path.TextChanged += (_, _) => ProbeVideo();
         monitors.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         devices.SelectedIndexChanged += (_, _) => UpdateSoundControls();
-        // A file can be silenced where it stands; a device has to be re-opened to stop asking it for
-        // sound at all, which is what Apply is for, and every other capture setting works the same way.
-        sound.SelectedIndexChanged += (_, _) => { if (!Capturing) playback?.SetMute(sound.Text == CaptureOptions.SoundOff); };
+        soundTrack.CheckedChanged += (_, _) => UpdateSoundControls();
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Wallcast", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
         menu.Items.Add("Stop wallpaper", null, (_, _) => Stop());
@@ -263,7 +276,7 @@ internal sealed class MainForm : Form
                 input = new VideoSource(path.Text, SelectedPlacement(), videoFrame);
             }
             status.Text = "Opening the input…";
-            playback.Start(input, screens[monitors.SelectedIndex], sound.Text == CaptureOptions.SoundOff);
+            playback.Start(input, screens[monitors.SelectedIndex], soundOff.Checked);
             SaveSettings();
         }
         catch (Exception ex) { status.Text = ex.Message; }
@@ -288,39 +301,44 @@ internal sealed class MainForm : Form
     private void UpdateSoundControls()
     {
         var available = !Capturing || DeviceHasSound;
-        sound.Enabled = available;
-        // The two following entries are about a device changing its mind mid-stream, which a file on
-        // disk never does, so in video mode they are not offered at all.
-        var offered = Capturing ? CaptureOptions.Sounds : CaptureOptions.FileSounds;
-        if (!sound.Items.Cast<string>().SequenceEqual(offered))
-        {
-            var chosen = sound.Text;
-            sound.Items.Clear();
-            sound.Items.AddRange(offered.Cast<object>().ToArray());
-            sound.SelectedIndex = Math.Max(0, Array.IndexOf(offered, chosen));
-        }
-        // Laid out as the list it is. A tooltip is drawn as one line unless the text says otherwise,
-        // and one line of this runs off the edge of the screen.
+        soundOff.Enabled = soundOn.Enabled = available;
+        if (!available && !soundOff.Checked) { soundOff.Checked = true; soundOn.Checked = false; }
+        // Only a device changes its mind halfway through; a file on disk keeps the rate it was encoded at.
+        trackRow.Visible = Capturing;
+        soundTrack.Enabled = available && soundOn.Checked;
+        // Laid out as the lines they are. A tooltip is drawn as one line unless the text says
+        // otherwise, and one line of this runs off the edge of the screen.
         var reason = !available
-            ? Wrap("This device sends a picture and no sound, so there is nothing to turn on. A virtual "
+            ? Wrap("This device sends a picture and no sound, so there is nothing to use. A virtual "
                 + "camera has no sound of its own: route its audio through a virtual audio device and "
                 + "capture that instead.")
             : !Capturing
                 ? Wrap("Whether the video file is heard. It takes effect where it stands, without applying again.")
             : string.Join(Environment.NewLine,
-                "Off — the device is asked for no sound at all. Nothing is captured and nothing is spent.",
-                "On — the sound the device is sending when you press Apply. It re-opens itself if the",
-                "    sound starts arriving at a rate that plainly disagrees, which costs nothing to",
-                "    notice; a card that quietly resamples instead hides that, and this will not catch it.",
-                "On, following the source — also asks the device what it is receiving, which catches the",
-                "    hidden case too, within about four seconds. Under half a percent of a core.",
-                "On, following closely — the same within about a second, for a source that changes",
-                "    rate track by track. Under two percent.",
-                "",
-                "Re-opening freezes the picture for about a second and a half; it does not go black.",
+                "Not using sound asks the device for none at all: nothing is captured and nothing is",
+                "spent. Using it takes the sound the device is sending when you press Apply.",
                 "Takes effect on Apply, like every other capture setting.");
-        soundTip.SetToolTip(sound, reason);
+        soundTip.SetToolTip(soundOff, reason);
+        soundTip.SetToolTip(soundOn, reason);
         soundTip.SetToolTip(soundRow, reason);
+        // The one thing worth explaining at length, because the reason it exists is not obvious and
+        // neither is what it costs.
+        var tracking = !soundTrack.Enabled
+            ? Wrap("Available once sound is in use.")
+            : string.Join(Environment.NewLine,
+                "Some sources change sample rate from one track to the next - an iPhone or iPad holding",
+                "its audio device exclusively is the usual one. The capture keeps the rate it opened",
+                "with, so the sound comes out at the wrong speed until it is opened again.",
+                "",
+                "This notices within about a second and re-opens the sound, which freezes the picture",
+                "for a second and a half; it does not go black or show the wallpaper through.",
+                "",
+                "It costs a little: the device is asked how it is doing every four hundred milliseconds,",
+                "about eight milliseconds an ask on a background thread, under two percent of one core.",
+                "Leaving it off still catches the sound arriving at plainly the wrong rate, which is",
+                "free to notice, but not a card that quietly resamples to the rate it was opened at.");
+        soundTip.SetToolTip(soundTrack, tracking);
+        soundTip.SetToolTip(trackRow, tracking);
     }
 
     private static ComboBox Choice(string[] values)
@@ -398,7 +416,12 @@ internal sealed class MainForm : Form
     // taken whenever the device offers it and silenced by Mute, which keeps the toggle instant: asking
     // the engine for it only on demand would mean restarting the capture every time it is clicked.
     private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor,
-        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "", sound.Text);
+        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "", SelectedSound);
+
+    // Two controls, one saved value: whether sound is used, and whether the device is asked how it is
+    // doing. Tracking belongs to a capture, so a video file never carries it.
+    private string SelectedSound => !soundOn.Checked ? CaptureOptions.SoundOff
+        : Capturing && soundTrack.Checked ? CaptureOptions.SoundClosely : CaptureOptions.SoundOn;
     private Placement SelectedPlacement() => new Placement(aspect.Text, customSize.Text, customMode.Text, SelectedAnchor).Normalize();
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)
@@ -499,7 +522,9 @@ internal sealed class MainForm : Form
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
             customSize.Text = options.CustomSize; customMode.SelectedItem = options.CustomMode;
-            if (sound.Items.Contains(options.Sound)) sound.SelectedItem = options.Sound;
+            soundOn.Checked = options.Sound != CaptureOptions.SoundOff;
+            soundOff.Checked = !soundOn.Checked;
+            soundTrack.Checked = options.Sound == CaptureOptions.SoundClosely;
             foreach (var cell in anchorCells) cell.Checked = (string?)cell.Tag == options.Anchor;
             UpdateAspectControls();
         }
