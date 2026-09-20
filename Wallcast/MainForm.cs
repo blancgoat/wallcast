@@ -162,7 +162,6 @@ internal sealed class MainForm : Form
                 soundOff.Checked = ReferenceEquals(sender, soundOff);
                 soundOn.Checked = ReferenceEquals(sender, soundOn);
                 UpdateSoundControls();
-                if (!Capturing) playback?.SetMute(soundOff.Checked);
             };
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
@@ -324,7 +323,7 @@ internal sealed class MainForm : Form
                 + "camera has no sound of its own: route its audio through a virtual audio device and "
                 + "capture that instead.")
             : !Capturing
-                ? Wrap("Whether the video file is heard. It takes effect where it stands, without applying again.")
+                ? Wrap("Whether the video file is heard. Takes effect on Apply, like everything else here.")
             : string.Join(Environment.NewLine,
                 "Not using sound asks the device for none at all: nothing is captured and nothing is",
                 "spent. Using it takes the sound the device is sending when you press Apply.",

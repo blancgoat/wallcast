@@ -292,16 +292,11 @@ internal static class Program
                     Console.WriteLine($"{told,6:F1}s arriving {live.SoundArriving:F0} Hz · app says {live.SoundOffered} · " +
                         $"from nothing {(scratchRates.Count > 0 ? scratchRates[0] : 0)} · rebuilt {Head(fresh)} · held {Head(stuck)}");
                 }
-                // Muting must not disturb the picture, which is why the sound is captured either way.
-                live.SetMute(true);
-                for (var i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(50); }
-                live.SetMute(false);
-                for (var i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(50); }
                 var stopping = Stopwatch.StartNew();
                 live.Stop();
                 Console.WriteLine($"STOP: playing with sound stopped in {stopping.ElapsedMilliseconds} ms");
                 if (stopping.ElapsedMilliseconds > 3000) { Console.WriteLine("FAIL: stopping hung, most likely on the sound stream"); return 2; }
-                Console.WriteLine("PASS: capture with sound plays, mutes live and stops cleanly");
+                Console.WriteLine("PASS: capture with sound plays and stops cleanly");
                 return 0;
             }
             // The loop is where a video wallpaper gives itself away: restarting the player throws the

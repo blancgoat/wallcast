@@ -345,11 +345,6 @@ internal sealed class Playback : IDisposable
         catch (InvalidOperationException) { }
     }
 
-    public void SetMute(bool mute)
-    {
-        if (player is not null) player.Mute = mute;
-        if (sound is not null) sound.Mute = mute;
-    }
     public void Stop()
     {
         generation++;

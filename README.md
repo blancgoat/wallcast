@@ -48,8 +48,8 @@ It asks the device what it is receiving, which is the only way to see a card qui
 rate its pin was opened at, and settles within about a second. That costs a little; the paragraph after
 next says how much.
 
-A video file gets the radio and not the checkbox: a file on disk keeps the rate it was encoded at. Its
-setting also takes effect where it stands rather than on Apply.
+A video file gets the radio and not the checkbox: a file on disk keeps the rate it was encoded at.
+Both take effect on Apply, like every other setting here.
 
 A capture device's sound comes off the device itself, on a pin beside the picture, and there is nothing
 separate to choose: it is taken whenever the device offers any and silenced by the checkbox, which is
@@ -274,7 +274,7 @@ Device format check: `dotnet run --project SmokeTests -c Release -r win-x64 --se
 
 Sound following check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --sound "Live Gamer BOLT" --follow` (add `--eager` for the faster setting). Ten minutes of the app's own playback on the desktop, reporting what the sound is arriving at and what the device says it is receiving. Change the source's sample rate while it runs: each change should be followed by a re-open and a Playing line at the new rate, and the gap between those two is what the picture spends frozen.
 
-Sound path check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --sound "Live Gamer BOLT"`. This one drives the app's own playback: it puts the device on the desktop with sound, mutes and unmutes it while it runs, and times the stop. The timing is the point. The player reads the engine's stdout, and a read there only returns once there is data or the writer is gone, so stopping in the wrong order would park the UI thread on a read nothing is going to answer. It ends the engine first, and the stop is expected to take well under a second.
+Sound path check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --sound "Live Gamer BOLT"`. This one drives the app's own playback: it puts the device on the desktop with sound and times the stop. The timing is the point. The player reads the engine's stdout, and a read there only returns once there is data or the writer is gone, so stopping in the wrong order would park the UI thread on a read nothing is going to answer. It ends the engine first, and the stop is expected to take well under a second.
 
 2026-09-20, capture sound. The Mute checkbox works for capture as well as video, and a capture device
 hands over the sound it sends alongside the picture. Both are muted to begin with. It travels as WAV on
