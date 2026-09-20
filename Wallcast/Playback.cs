@@ -22,6 +22,9 @@ internal sealed class Playback : IDisposable
     // What the device says it is receiving, which is not the same as what the pin was opened at.
     public int SoundOffered { get; private set; }
     private DesktopHost? host;
+    /// <summary>Where the picture ended up on the monitor, in screen pixels. A click on the desktop
+    /// is only meaningful against this rectangle: it is what the far end's whole screen maps onto.</summary>
+    public Rectangle Picture { get; private set; }
     private IWallpaperSource? source;
     private int generation;
     private readonly ConcurrentQueue<string> errors = new();
@@ -60,6 +63,7 @@ internal sealed class Playback : IDisposable
                 var area = options.Fit(screen.Bounds.Size);
                 area.Offset(screen.Bounds.Location);
                 host.Attach(screen, area);
+                Picture = area;
                 live = device with { Options = options };
                 liveMute = mute;
                 reopens = 0;
@@ -75,6 +79,7 @@ internal sealed class Playback : IDisposable
             var placed = window;
             placed.Offset(screen.Bounds.Location);
             host.Attach(screen, placed);
+            Picture = placed;
             player = new MediaPlayer(engine) { Hwnd = host.Handle, Mute = mute };
             player.EnableKeyInput = false;
             player.EnableMouseInput = false;
@@ -348,6 +353,7 @@ internal sealed class Playback : IDisposable
     public void Stop()
     {
         generation++;
+        Picture = Rectangle.Empty;
         drift?.Dispose();
         drift = null;
         listen?.Dispose();

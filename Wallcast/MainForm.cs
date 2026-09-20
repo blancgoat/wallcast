@@ -57,6 +57,17 @@ internal sealed class MainForm : Form
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
 
+    private static readonly string[] TouchModes =
+        ["Don't send clicks", "Send clicks held with Alt", "Send every click on the picture"];
+    private readonly ComboBox touch = Choice(TouchModes);
+    private readonly ComboBox touchDevice = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 325, Margin = new Padding(3, 4, 3, 4) };
+    private readonly TableLayoutPanel touchSettings = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, Margin = new Padding(0, 8, 0, 0) };
+    private readonly ToolTip touchTip = new() { ShowAlways = true, AutoPopDelay = 20000, InitialDelay = 350 };
+    private readonly Label touchState = new() { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0), Margin = new Padding(0, 6, 0, 0) };
+    private readonly DesktopClicks clicks = new();
+    private readonly Pointer pointer = new();
+    private List<(string Name, string Address)> paired = [];
+
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer watchdog = new() { Interval = 2000 };
     // A FlowLayoutPanel that scrolls itself settles how far it scrolls before its AutoSize children
@@ -67,6 +78,7 @@ internal sealed class MainForm : Form
     private readonly FlowLayoutPanel body = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28) };
     private Playback? playback;
     private bool exiting;
+    private string? savedTouchDevice;
     private Screen[] screens = [];
     private static readonly string SettingsPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wallcast", "settings.json");
 
@@ -161,6 +173,12 @@ internal sealed class MainForm : Form
                 soundOn.Checked = ReferenceEquals(sender, soundOn);
                 UpdateSoundControls();
             };
+        body.Controls.Add(Caption("Clicking the wallpaper"));
+        AddSetting(touchSettings, "Clicks", touch);
+        AddSetting(touchSettings, "Send them to", touchDevice);
+        body.Controls.Add(touchSettings);
+        body.Controls.Add(touchState);
+
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
         actions.Controls.Add(Button("Apply to desktop", Apply));
@@ -168,6 +186,19 @@ internal sealed class MainForm : Form
         actions.Controls.Add(Button("Hide to tray", (_, _) => Hide()));
         body.Controls.Add(actions);
         body.Controls.Add(status);
+        touch.SelectedIndexChanged += (_, _) => UpdateTouchControls();
+        touchDevice.SelectedIndexChanged += (_, _) =>
+            pointer.Target = (touchDevice.SelectedItem as string) is { } pick
+                ? paired.FirstOrDefault(device => device.Name == pick).Address : null;
+        // A hook runs on this thread, so none of these may wait on anything: they leave a note for
+        // the radio and return. The far end's screen is the picture, so a fraction of one is a
+        // fraction of the other, and nothing here needs to know a resolution.
+        clicks.Hooked += Pointer.Watch;
+        clicks.Moved += where => pointer.MoveTo(where.X, where.Y);
+        clicks.Clicked += (where, button, down) => { pointer.MoveTo(where.X, where.Y); pointer.Button(button, down); };
+        clicks.Scrolled += (where, notches) => { pointer.MoveTo(where.X, where.Y); pointer.Wheel(notches); };
+        pointer.Status += line => BeginInvoke(() => touchState.Text = Wrap(line));
+
         mode.SelectedIndexChanged += (_, _) => UpdateMode();
         path.TextChanged += (_, _) => ProbeVideo();
         monitors.SelectedIndexChanged += (_, _) => UpdateAspectControls();
@@ -191,7 +222,7 @@ internal sealed class MainForm : Form
         {
             if (!exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
         };
-        FormClosed += (_, _) => { watchdog.Dispose(); playback?.Dispose(); tray.Dispose(); };
+        FormClosed += (_, _) => { watchdog.Dispose(); clicks.Dispose(); pointer.Dispose(); playback?.Dispose(); tray.Dispose(); };
         // The status line is the last thing in the window and the one that grows: an error or a
         // After the children are arranged, not before: that is the only moment their real heights
         // are known, and it is the growing of one of them that made the old extent too short.
@@ -205,6 +236,7 @@ internal sealed class MainForm : Form
             }
         };
         UpdateMode();
+        UpdateTouchControls();
         LeaveTheWheelAlone(body);
         ScaleGeometry(this, DeviceDpi / 96f);
         ResumeLayout(true);
@@ -259,6 +291,24 @@ internal sealed class MainForm : Form
         RefreshMonitors(); RefreshDevices(); LoadSettings(); UpdateMode();
         try { playback = new Playback(this); playback.Status += text => status.Text = text; watchdog.Start(); }
         catch (Exception ex) { status.Text = "Playback engine failed to start: " + ex.Message; }
+        // The paired list is a Bluetooth enumeration and takes a moment, so it lands after the rest
+        // of the window rather than holding it up. The saved choice waits for it.
+        _ = RefreshPairedAsync(savedTouchDevice);
+    }
+
+    private async Task RefreshPairedAsync(string? want)
+    {
+        paired = await Pointer.PairedAsync();
+        touchDevice.Items.Clear();
+        foreach (var device in paired) touchDevice.Items.Add(device.Name);
+        if (touchDevice.Items.Count == 0)
+        {
+            touchState.Text = Wrap("No paired Bluetooth devices. Pair the device with this PC in Windows' Bluetooth settings first.");
+            return;
+        }
+        var index = want is null ? -1 : paired.FindIndex(device => device.Address.Equals(want, StringComparison.OrdinalIgnoreCase));
+        touchDevice.SelectedIndex = index >= 0 ? index : 0;
+        if (Poking) UpdateTouchControls();
     }
 
     private void RefreshMonitors()
@@ -312,12 +362,25 @@ internal sealed class MainForm : Form
             }
             status.Text = "Opening the input…";
             playback.Start(input, screens[monitors.SelectedIndex], soundOff.Checked);
+            // The picture only has a rectangle once it has been placed, and the hook takes its
+            // clicks from exactly that rectangle.
+            clicks.Area = playback.Picture;
+            if (Poking && !playback.Picture.IsEmpty) clicks.Start();
             SaveSettings();
         }
         catch (Exception ex) { status.Text = ex.Message; }
     }
 
-    private void Stop() { playback?.Stop(); status.Text = "Stopped · your original wallpaper is back."; }
+    private void Stop()
+    {
+        // The hook goes first: a click swallowed for a picture that is no longer there is a click
+        // the desktop never gets back.
+        clicks.Stop();
+        clicks.Area = Rectangle.Empty;
+        pointer.Release();
+        playback?.Stop();
+        status.Text = "Stopped · your original wallpaper is back.";
+    }
     private void UpdateMode()
     {
         var parent = captureRow.Parent;
@@ -374,6 +437,64 @@ internal sealed class MainForm : Form
                 "free to notice, but not a card that quietly resamples to the rate it was opened at.");
         soundTip.SetToolTip(soundTrack, tracking);
         soundTip.SetToolTip(trackRow, tracking);
+    }
+
+    private bool Poking => touch.SelectedIndex > 0;
+
+    // Clicking is off unless it is asked for, and it stays off while nothing is on the desktop:
+    // a hook that swallows clicks over a rectangle that is not showing anything is just a hole in
+    // the desktop. Everything it needs - the radio and the hook - is started and stopped from here.
+    private void UpdateTouchControls()
+    {
+        touchDevice.Enabled = Poking;
+        clicks.RequireAlt = touch.SelectedIndex == 1;
+        touchTip.SetToolTip(touch, Wrap(
+            "Sends a click on the picture to the device as a tap, over Bluetooth, as though this PC "
+            + "were a mouse. Dragging and the wheel carry through, so lists scroll; there is no second "
+            + "finger, so pinching does not. The device has to be paired with this PC in Windows' "
+            + "Bluetooth settings first, and an iPad or iPhone also needs AssistiveTouch turned on "
+            + "under Accessibility, or it will take the clicks and draw no pointer. Desktop icons "
+            + "keep their clicks: one sitting over the picture is still the desktop's, so whatever "
+            + "is underneath it cannot be tapped until the icon is moved. A click lands where the "
+            + "picture says only while the picture is exactly the device's screen - a placement that "
+            + "leaves the source's black bars in the picture shifts every tap by the width of them."));
+        touchTip.SetToolTip(touchDevice, Wrap(
+            "Which paired device the clicks go to. Every Apple device that has ever paired with this "
+            + "PC answers, and the first to answer would otherwise get them."));
+
+        if (!Poking)
+        {
+            clicks.Stop();
+            pointer.Dispose();
+            touchState.Text = "";
+            return;
+        }
+        touchState.Text = "Starting Bluetooth…";
+        _ = StartPokingAsync();
+    }
+
+    private async Task StartPokingAsync()
+    {
+        try
+        {
+            if (!await Pointer.SupportedAsync())
+                throw new InvalidOperationException("This PC's Bluetooth radio cannot act as a mouse for another device.");
+            await pointer.StartAsync();
+            // The picture is where the clicks are taken from, so there is nothing to hook until
+            // something is on the desktop. Apply does it from the other side.
+            // Settings are read before the engine exists, so a saved choice can arrive first. There
+            // is simply nothing to hook until something is placed.
+            var picture = playback?.Picture ?? Rectangle.Empty;
+            if (!picture.IsEmpty) { clicks.Area = picture; clicks.Start(); }
+            touchState.Text = Wrap(pointer.Connected
+                ? "Clicks are reaching the device."
+                : "Waiting for the device to connect to this PC. Open its Bluetooth settings and pick this PC.");
+        }
+        catch (Exception problem) when (problem is not OutOfMemoryException)
+        {
+            touch.SelectedIndex = 0;
+            touchState.Text = Wrap(problem.Message);
+        }
     }
 
     private static ComboBox Choice(string[] values)
@@ -533,7 +654,7 @@ internal sealed class MainForm : Form
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(mode.Text, path.Text, devices.SelectedItem as string, screens[monitors.SelectedIndex].DeviceName, (int)cache.Value, SelectedCaptureOptions())));
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(mode.Text, path.Text, devices.SelectedItem as string, screens[monitors.SelectedIndex].DeviceName, (int)cache.Value, SelectedCaptureOptions(), touch.Text, pointer.Target)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { status.Text = "Playing · could not save settings: " + ex.Message; }
     }
@@ -561,9 +682,13 @@ internal sealed class MainForm : Form
             soundOff.Checked = !soundOn.Checked;
             soundTrack.Checked = options.Sound == CaptureOptions.SoundClosely;
             foreach (var cell in anchorCells) cell.Checked = (string?)cell.Tag == options.Anchor;
+            var poke = Array.IndexOf(TouchModes, saved.Touch ?? "");
+            touch.SelectedIndex = poke >= 0 ? poke : 0;
+            savedTouchDevice = saved.TouchDevice;
             UpdateAspectControls();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { status.Text = "Could not read saved settings, started with defaults."; }
     }
-    private sealed record Settings(string Mode, string Path, string? Device, string Monitor, int Cache, CaptureOptions? Capture = null);
+    private sealed record Settings(string Mode, string Path, string? Device, string Monitor, int Cache,
+        CaptureOptions? Capture = null, string? Touch = null, string? TouchDevice = null);
 }

@@ -229,6 +229,49 @@ internal static class Program
             // The interop that asks a device what its sound pin is offering. Worth running on its own
             // before anything depends on it: a vtable slot in the wrong place crashes the process
             // rather than returning an error.
+            // Sending is not the same as arriving, and the only honest check is at the far end: the
+            // pointer is walked across the device's screen and someone says whether it followed.
+            // Everything up to the radio is checked here without help.
+            if (args.Contains("--touch"))
+            {
+                var want = args.SkipWhile(a => a != "--touch").Skip(1).Take(1).FirstOrDefault(a => !a.StartsWith("--"));
+                if (!Pointer.SupportedAsync().GetAwaiter().GetResult()) { Console.WriteLine("FAIL: this radio cannot act as a peripheral"); return 1; }
+                Console.WriteLine("PASS: radio takes the peripheral role");
+
+                var paired = Pointer.PairedAsync().GetAwaiter().GetResult();
+                foreach (var device in paired) Console.WriteLine($"PAIRED: {device.Name} · {device.Address}");
+                var target = want ?? paired.FirstOrDefault().Address;
+                if (target is null) { Console.WriteLine("FAIL: nothing is paired with this PC"); return 1; }
+
+                using var pointer = new Pointer { Target = target };
+                pointer.Status += line => Console.WriteLine($"  {line}");
+                pointer.StartAsync().GetAwaiter().GetResult();
+                Console.WriteLine($"PASS: advertising as a Bluetooth mouse, waiting for {target}");
+
+                var clock = Stopwatch.StartNew();
+                while (!pointer.Connected && clock.Elapsed < TimeSpan.FromSeconds(120)) Thread.Sleep(250);
+                if (!pointer.Connected) { Console.WriteLine("FAIL: the device never connected"); return 1; }
+                Console.WriteLine($"PASS: connected after {clock.Elapsed.TotalSeconds:0.0}s");
+
+                foreach (var (across, down, name) in new[]
+                         {
+                             (0.5, 0.5, "centre"), (0.02, 0.02, "top left"), (0.98, 0.02, "top right"),
+                             (0.98, 0.98, "bottom right"), (0.02, 0.98, "bottom left"), (0.5, 0.5, "centre"),
+                         })
+                {
+                    Console.WriteLine($"MOVE: {name}");
+                    // Held still, a pointer fades out of sight, so it is nudged by a unit it cannot
+                    // be seen to move by. Watch the device: it should step, not glide.
+                    for (var tick = 0; tick < 12; tick++)
+                    {
+                        pointer.MoveTo(across + (tick % 2) * 0.0001, down);
+                        Thread.Sleep(200);
+                    }
+                }
+                Console.WriteLine("LOOK: did the pointer step to each corner and reach the edges?");
+                return 0;
+            }
+
             if (args.Contains("--rates"))
             {
                 var name = args.SkipWhile(a => a != "--rates").Skip(1).Take(1).FirstOrDefault(a => !a.StartsWith("--"));

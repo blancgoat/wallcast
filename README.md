@@ -10,10 +10,13 @@ A small live wallpaper app for Windows.
 - **A capture card or virtual camera runs on your desktop**, behind the icons, on the monitor you pick. Literally the wallpaper.
 - **A video file works too.** If you run Wallpaper Engine for a video wallpaper, this takes its place.
 - **Sound comes with it**, if you want it. Off to begin with.
+- **Click it and it clicks back** (beta). A click on the wallpaper reaches the device as a tap, over
+  Bluetooth. It aims true as long as the picture is exactly the device's screen; a placement that
+  leaves the source's black bars in shifts the target with it.
 
 ## Install
 
-Windows 10 or 11, x64. Download `Wallcast-v1.2.0-win-x64.zip` from
+Windows 10 or 11, x64. Download `Wallcast-v1.3.0-beta.1-win-x64.zip` from
 [Releases](https://github.com/blancgoat/wallcast/releases), unpack it anywhere and run
 `Wallcast\Wallcast.exe`.
 
