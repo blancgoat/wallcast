@@ -179,6 +179,28 @@ internal static class Program
                 Application.Run();
                 return result;
             }
+            // The interop that asks a device what its sound pin is offering. Worth running on its own
+            // before anything depends on it: a vtable slot in the wrong place crashes the process
+            // rather than returning an error.
+            if (args.Contains("--rates"))
+            {
+                var name = args.SkipWhile(a => a != "--rates").Skip(1).Take(1).FirstOrDefault(a => !a.StartsWith("--"));
+                foreach (var candidate in name is null ? CaptureDevices.Enumerate() : [name])
+                {
+                    var clock = Stopwatch.StartNew();
+                    var rates = SoundFormats.Rates(candidate);
+                    Console.WriteLine($"{candidate}: {(rates.Count == 0 ? "no answer" : string.Join(", ", rates))} ({clock.Elapsed.TotalMilliseconds:F1} ms)");
+                }
+                // Repeated, because a leak or a double free shows up on the tenth call rather than the first.
+                var repeats = Stopwatch.StartNew();
+                var device = name ?? CaptureDevices.Enumerate()[0];
+                for (var i = 0; i < 50; i++) SoundFormats.Rates(device);
+                Console.WriteLine($"50 more asks took {repeats.Elapsed.TotalMilliseconds:F0} ms in total");
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                Console.WriteLine("PASS: the device answered and the process is still standing");
+                return 0;
+            }
             // Sound and picture come out of one engine process, and the player reads that process's
             // stdout. A read there only returns when there is data or the writer is gone, so stopping
             // in the wrong order parks the UI thread on a read nothing will answer. This drives the
@@ -196,9 +218,27 @@ internal static class Program
                 using var dispatcher = new Control();
                 _ = dispatcher.Handle;
                 using var live = new Playback(dispatcher);
-                live.Status += text => Console.WriteLine("STATUS: " + text);
+                var clock = Stopwatch.StartNew();
+                live.Status += text => Console.WriteLine($"{clock.Elapsed.TotalSeconds,6:F1}s {text}");
                 live.Start(new CaptureSource(device, 150, settings), Screen.PrimaryScreen!, mute: false);
-                for (var i = 0; i < 100; i++) { Application.DoEvents(); Thread.Sleep(50); }
+                // A pin keeps its negotiated rate, so following a source that changes rate can only be
+                // watched against a source that actually changes. The gap between the re-open notice
+                // and the next Playing line is what the picture spends frozen.
+                var watching = args.Contains("--follow") ? 600 : 5;
+                Console.WriteLine($"{clock.Elapsed.TotalSeconds,6:F1}s watching for {watching}s" + (watching > 10 ? "; change the source rate whenever you like" : ""));
+                var told = 0.0;
+                while (clock.Elapsed.TotalSeconds < watching)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(50);
+                    // Printed as it goes, so a detector that never fires can be told apart from one
+                    // that had nothing to fire at.
+                    if (watching <= 10 || clock.Elapsed.TotalSeconds - told < 5) continue;
+                    told = clock.Elapsed.TotalSeconds;
+                    if (live.SoundArriving > 0)
+                        Console.WriteLine($"{told,6:F1}s arriving {live.SoundArriving:F0} Hz" +
+                            (live.SoundOffered > 0 ? $", device offering {live.SoundOffered} Hz" : ""));
+                }
                 // Muting must not disturb the picture, which is why the sound is captured either way.
                 live.SetMute(true);
                 for (var i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(50); }

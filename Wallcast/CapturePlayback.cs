@@ -30,7 +30,9 @@ internal sealed class CapturePlayback : IDisposable
     public CaptureOptions Options { get; }
     public string? InputDescription { get; private set; }
     // What the sound pin was actually opened at, which is the device's answer rather than a request.
+    // The pin keeps this for as long as it is open, whatever the source does afterwards.
     public string? SoundDescription { get; private set; }
+    public int SoundRate { get; private set; }
     // The engine's stdout, carrying WAV, for whoever is going to play it. Null for a silent capture.
     public Stream? Sound => Options.HasSound ? process.StandardOutput.BaseStream : null;
 
@@ -48,7 +50,10 @@ internal sealed class CapturePlayback : IDisposable
             if (string.IsNullOrWhiteSpace(e.Data)) return;
             if (InputDescription is null && e.Data.Contains("Video:")) InputDescription = e.Data.Trim();
             if (SoundDescription is null && e.Data.Contains("Audio:") && SoundFormat.Match(e.Data) is { Success: true } sound)
-                SoundDescription = $"{sound.Groups["rate"].Value} Hz {sound.Groups["layout"].Value}";
+            {
+                SoundRate = int.Parse(sound.Groups["rate"].Value);
+                SoundDescription = $"{SoundRate} Hz {sound.Groups["layout"].Value}";
+            }
             errors.Enqueue(e.Data);
             while (errors.Count > 12) errors.TryDequeue(out _);
         };
@@ -104,11 +109,20 @@ internal sealed class CapturePlayback : IDisposable
         }
     }
 
-    // Ends the engine without waiting on anything. Whoever is reading its stdout for sound is blocked
-    // in a read that only returns once there is data or the writer is gone, so this comes first.
+    // Ends the engine and waits for it to actually be gone. Whoever is reading its stdout for sound is
+    // blocked in a read that only returns once there is data or the writer is gone, so this comes
+    // first; and the device is not free for anyone else to open until the process has really exited.
     public void Kill()
     {
-        try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { }
+        // Cancelled before it is killed, so the reader knows the broken pipe was this and not the
+        // device. Otherwise ending an engine on purpose reports itself as a capture failure.
+        try { cancellation.Cancel(); } catch (ObjectDisposedException) { }
+        try
+        {
+            if (!process.HasExited) process.Kill(true);
+            process.WaitForExit(3000);
+        }
+        catch (InvalidOperationException) { }
     }
 
     public byte[]? TakeFrame() => Interlocked.Exchange(ref latest, null);

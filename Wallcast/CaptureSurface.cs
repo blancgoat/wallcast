@@ -11,7 +11,7 @@ namespace Wallcast;
 // the screen is not covered by it stays the wallpaper the user already had.
 internal sealed class CaptureSurface : Control
 {
-    private readonly CapturePlayback capture;
+    private CapturePlayback capture;
     private readonly Size frame;
     private int queued;
     private bool stopped;
@@ -34,6 +34,16 @@ internal sealed class CaptureSurface : Control
     }
 
     protected override void OnHandleCreated(EventArgs e) => base.OnHandleCreated(e);
+
+    // The capture underneath can be replaced without taking the window down. Re-opening the engine
+    // then freezes the picture on its last frame - the swap chain still holds it - rather than
+    // putting a hole in the wallpaper for as long as the device takes to come back.
+    public void Follow(CapturePlayback next)
+    {
+        capture.FrameReady -= OnFrameReady;
+        capture = next;
+        if (!stopped) next.FrameReady += OnFrameReady;
+    }
 
     // Presenting the moment a frame lands beats polling on a timer, whose ~15ms resolution adds that
     // much latency to every frame. One draw in flight is enough: the capture keeps only the newest.

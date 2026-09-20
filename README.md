@@ -65,9 +65,24 @@ with a 44.1kHz source, forced to 48000: it kept sending 44100 samples a second u
 so ten seconds of sound arrived in 9.19 - 8.8% fast, exactly 44100/48000. Nothing here compensates for
 that, which is why the rate is the device's to state rather than anyone's to pick.
 
-The format settles when playback starts. A source that changes its rate afterwards - one track at
-44.1kHz and the next at 48kHz - is not followed, because the sound shares its input with the picture
-and re-opening one re-opens both. Press **Apply to desktop** again and it is taken afresh.
+A source that changes its rate afterwards - one track at 44.1kHz and the next at 48kHz - is followed
+on its own. The pin keeps the rate it negotiated, so this costs re-opening the engine, and because the
+sound shares its input with the picture that re-opens both: the picture freezes on its last frame for
+about a second and a half. It does not go black or show the wallpaper through, because the window and
+its swap chain stay where they are and only the engine underneath is replaced.
+
+Two things say that the source has changed. What arrives per second stops matching the rate the pin
+claims, which catches a card that keeps sending its old rate under the new label and is free to notice
+because the bytes are already in hand. And the device's own format list, which it reorders to put what
+it is receiving first and will answer while it is being captured - about eight milliseconds, asked
+every two seconds, in this process and with nothing launched. That second one is what does the work:
+a card that resamples to the rate its pin was opened at sends exactly as many bytes a second as it
+should while making a mess of the sound, so only the device knows. A device that will not answer is
+not asked again, and its sound then simply keeps whatever it negotiated when playback started.
+
+Measured on a Live Gamer BOLT across 44.1kHz, 48kHz and 96kHz sources: three changes, three re-opens,
+1.6s, 1.5s and 1.7s of frozen picture, no false alarm in between. A 96kHz source needs no re-open when
+the pin is at 48000, because the card converts it down to exactly that.
 
 The picture and the sound travel separately, so they are not locked together to the sample. The sound
 is buffered by the capture buffer value, the same dial that trades latency for a steady picture.
@@ -178,6 +193,8 @@ licence and where its source lives. Keep both in any archive you distribute.
 - `Placement.cs`: output resolution, mapping mode and screen anchor. Shared, so a video file and a capture of the same shape are placed by the same arithmetic.
 - `Playback.cs`: picks the playback path per input, LibVLC video playback, seamless looping, the crop and display aspect it hands the player, errors and cleanup.
 - `VideoProbe.cs`: reads a video file's displayed shape out of the bundled FFmpeg, so a file can be placed like a capture.
+- `SoundStream.cs`: reads the engine's stdout as fast as it is written, so the engine never waits on the player and what the device is really sending can be counted.
+- `SoundFormats.cs`: asks a device what its sound pin offers, in this process, so a source that changes sample rate can be followed without launching anything.
 - `CaptureOptions.cs`: pixel format, resolution, FPS and YUV conversion, plus the crop that takes the capture card's black bars off. The geometry itself belongs to `Placement.cs`.
 - `CapturePlayback.cs`: FFmpeg DirectShow input, explicit color conversion, keeps the newest frame. Sound, when the device has any, leaves the same process on stdout as WAV and is played from that stream. Frames arrive over a named pipe. A redirected stdout pipe has a small buffer and stalls near 800 MB/s, while 4K 60fps BGRA needs 2.0 GB/s.
 - `CaptureSurface.cs`: presents BGRA frames through a DXGI flip-model swap chain and keeps the aspect ratio. Scaling runs on the GPU.
@@ -221,6 +238,10 @@ Form check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contai
 Throughput check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --bench "Live Gamer BOLT"`. It reports frames per second and MB/s actually received at 1080p, 1440p and 4K. Anything slower than the device emits means that difference in frames piling up in the queue as latency. Start here for latency problems.
 
 Real device check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --capture "Live Gamer BOLT"`. It opens NV12/Rec.709/Limited/1080p60 for ten seconds and checks that frames arrive. Adding `--snapshot` saves one frame to `artifacts/capture-nv12-rec709.png`. Adding `--sound` also asks the device for its audio and writes what the player decodes out of the engine's stdout to `artifacts/capture-sound.wav`, so the size of that file says whether sound ran at real time for the whole ten seconds. The app itself never records or saves the screen.
+
+Device format check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --rates`. It asks every capture device what its sound pin offers, through the same interop the app uses to follow a source that changes rate, and asks fifty more times to see whether anything leaks or double-frees. A vtable slot in the wrong place takes the process down rather than returning an error, so this is worth running on its own before trusting it.
+
+Sound following check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --sound "Live Gamer BOLT" --follow`. Ten minutes of the app's own playback on the desktop, reporting what the sound is arriving at and what the device says it is receiving. Change the source's sample rate while it runs: each change should be followed by a re-open and a Playing line at the new rate, and the gap between those two is what the picture spends frozen.
 
 Sound path check: `dotnet run --project SmokeTests -c Release -r win-x64 --self-contained true -- --sound "Live Gamer BOLT"`. This one drives the app's own playback: it puts the device on the desktop with sound, mutes and unmutes it while it runs, and times the stop. The timing is the point. The player reads the engine's stdout, and a read there only returns once there is data or the writer is gone, so stopping in the wrong order would park the UI thread on a read nothing is going to answer. It ends the engine first, and the stop is expected to take well under a second.
 
