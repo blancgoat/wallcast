@@ -15,8 +15,14 @@ namespace Wallcast;
 // correct. Measured on an iPad Pro: 0..32767 maps onto the whole screen with no scale error, and a
 // tap aimed at a button by screen fraction landed on it.
 //
-// What it cannot do is touch. iPadOS draws a pointer for this and treats a click as a tap, so drags
-// and scrolling work, but there is no second finger and so no pinch.
+// What it cannot do is a second finger. iPadOS draws a pointer for this and synthesises real touch
+// from it, so a tap is a tap and a drag is a drag - a list scrolls by being dragged, exactly as a
+// finger would scroll it. Pinching needs two points and there is only one.
+//
+// The wheel is sent and iPadOS ignores it. Measured: six notches over a scrollable grid moved
+// nothing, while a drag at the same spot scrolled it several rows. The likely reason is the absolute
+// axes - a pointer that reports a position rather than a movement is not the kind of device iOS
+// wires a wheel to. It is left in because it costs nothing and other hosts do take it.
 internal sealed class Pointer : IDisposable
 {
     private const byte ReportId = 2;
@@ -183,10 +189,13 @@ internal sealed class Pointer : IDisposable
                 // that: iPadOS glides its pointer onto whatever is under it and only then can the
                 // thing be pressed or scrolled. A single report that teleports and presses at once
                 // draws the press animation and does nothing at all - measured, and the reason a
-                // click that was plainly sent did not take. A wheel is the same: it scrolls whatever
-                // the pointer had settled on, so one that arrives with a jump has nothing to scroll.
-                // The position goes first, on its own, and the rest follows a beat later.
-                if ((buttons != wasButtons || wheel != 0) && (x != wasX || y != wasY))
+                // click that was plainly sent did not take. The position goes first, on its own, and
+                // the button follows a beat later.
+                //
+                // Only for buttons. A two-finger scroll nudges the pointer a few pixels with every
+                // notch, so settling on those spent 40ms and an extra report on each one, for a
+                // wheel iPadOS was not acting on anyway.
+                if (buttons != wasButtons && (x != wasX || y != wasY))
                 {
                     Note($"settle at {x},{y}");
                     await NotifyAsync(client, Payload((byte)wasButtons, (ushort)x, (ushort)y, 0));

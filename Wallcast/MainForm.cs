@@ -460,8 +460,9 @@ internal sealed class MainForm : Form
         clicks.RequireAlt = touch.SelectedIndex == 1;
         touchTip.SetToolTip(touch, Wrap(
             "Sends a click on the picture to the device as a tap, over Bluetooth, as though this PC "
-            + "were a mouse. Dragging and the wheel carry through, so lists scroll; there is no second "
-            + "finger, so pinching does not. The device has to be paired with this PC in Windows' "
+            + "were a mouse. Dragging carries through, so a list scrolls by dragging it the way a "
+            + "finger would; an iPad ignores the wheel from this and there is no second finger, so "
+            + "pinching does not work either. The device has to be paired with this PC in Windows' "
             + "Bluetooth settings first, and an iPad or iPhone also needs AssistiveTouch turned on "
             + "under Accessibility, or it will take the clicks and draw no pointer. Desktop icons "
             + "keep their clicks: one sitting over the picture is still the desktop's, so whatever "
