@@ -58,10 +58,44 @@ internal static class Program
                 {
                     box.SelectedItem = device;
                     Application.DoEvents();
+                    var rates = (ComboBox)Field("soundRate");
+                    var shown = rates.Items.Cast<string>().ToArray();
+                    var real = CaptureDevices.SoundRates(device).ToArray();
+                    // The rates have to be the device's own, not a list this app made up.
+                    if (silence.Enabled && real.Length > 0 && !shown.SequenceEqual(real))
+                        throw new Exception($"{device} offers {string.Join("/", real)} but the form shows {string.Join("/", shown)}");
+                    // The device heads its list with what it is receiving, so that is where to start.
+                    if (silence.Enabled && real.Length > 0 && rates.Text != real[0])
+                        throw new Exception($"{device} puts {real[0]} first but the form starts on {rates.Text}");
+                    if (silence.Enabled && (soundTip.GetToolTip(rates) ?? "").Length < 40)
+                        throw new Exception($"{device} leaves the rate unexplained");
                     var why = soundTip.GetToolTip(silence) ?? "";
                     if (why.Length < 40) throw new Exception($"{device} leaves the mute box unexplained: " + why);
                     if (!silence.Enabled && !why.Contains("no sound")) throw new Exception($"{device} greys the box out without saying so: " + why);
-                    Console.WriteLine($"PASS: {device} · mute {(silence.Enabled ? "live" : "greyed")}");
+                    Console.WriteLine($"PASS: {device} · mute {(silence.Enabled ? "live" : "greyed")} · rates {(shown.Length == 0 ? "none" : string.Join("/", shown))}{(silence.Enabled ? " (from the device)" : "")}");
+                }
+                // The fresh case, where nobody has picked a rate yet: the device's own first choice has
+                // to win even when the box is sitting on something else. Settings normally decide this,
+                // so it is driven here rather than by moving the user's file out of the way.
+                var picked = typeof(MainForm).GetField("rateChosen", hidden)!;
+                var rateBox = (ComboBox)Field("soundRate");
+                // The loop above left the box on the last device, which may be a silent one.
+                var withSound = box.Items.Cast<string>().FirstOrDefault(d => CaptureDevices.SoundRates(d).Count > 1);
+                var wanted = withSound is null ? [] : CaptureDevices.SoundRates(withSound).ToArray();
+                if (withSound is not null)
+                {
+                    box.SelectedItem = withSound;
+                    Application.DoEvents();
+                    rateBox.SelectedIndex = rateBox.Items.Count - 1;
+                    picked.SetValue(form, false);
+                    typeof(MainForm).GetMethod("UpdateSoundControls", hidden)!.Invoke(form, null);
+                    if (rateBox.Text != wanted[0]) throw new Exception($"With nothing chosen the rate should fall to {wanted[0]}, not {rateBox.Text}");
+                    // And a choice, once made, has to survive the next refresh.
+                    rateBox.SelectedIndex = rateBox.Items.Count - 1;
+                    var mine = rateBox.Text;
+                    typeof(MainForm).GetMethod("UpdateSoundControls", hidden)!.Invoke(form, null);
+                    if (rateBox.Text != mine) throw new Exception($"A chosen rate of {mine} was overruled with {rateBox.Text}");
+                    Console.WriteLine($"PASS: rate falls to the device's {wanted[0]} until chosen, then keeps {mine}");
                 }
                 return 0;
             }
@@ -191,6 +225,7 @@ internal static class Program
                     ?? CaptureDevices.Enumerate()[0];
                 var audible = CaptureDevices.EnumerateAudio();
                 Console.WriteLine($"DEVICES: {audible.Count} can send sound: {string.Join(", ", audible)}");
+                Console.WriteLine($"RATES: {device} offers {string.Join(", ", CaptureDevices.SoundRates(device))}");
                 var settings = new CaptureOptions(Audio: audible.Contains(device) ? device : "").Normalize();
                 if (!settings.HasSound) { Console.WriteLine($"SKIP: {device} sends no sound"); return 0; }
                 using var dispatcher = new Control();

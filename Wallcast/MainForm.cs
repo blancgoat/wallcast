@@ -51,6 +51,11 @@ internal sealed class MainForm : Form
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
     private readonly ComboBox soundRate = Choice(CaptureOptions.SoundRates);
+    // Asking a device costs a short engine run, so each answer is kept for as long as the app is up.
+    private readonly Dictionary<string, string[]> offered = [];
+    // Until someone picks a rate the device's own first choice is the better guess; after that it is
+    // theirs to keep. Refilling the list must not be mistaken for a choice.
+    private bool rateChosen, fillingRates;
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer watchdog = new() { Interval = 2000 };
     private Playback? playback;
@@ -152,6 +157,7 @@ internal sealed class MainForm : Form
         path.TextChanged += (_, _) => ProbeVideo();
         monitors.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         devices.SelectedIndexChanged += (_, _) => UpdateSoundControls();
+        soundRate.SelectedIndexChanged += (_, _) => { if (!fillingRates) rateChosen = true; };
         mute.CheckedChanged += (_, _) => playback?.SetMute(mute.Checked);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Wallcast", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
@@ -285,11 +291,45 @@ internal sealed class MainForm : Form
         var available = !Capturing || DeviceHasSound;
         mute.Enabled = available;
         soundRate.Enabled = Capturing && DeviceHasSound;
+        if (Capturing && DeviceHasSound) FillSoundRates((string)devices.SelectedItem!);
         var reason = available
             ? "Clear this to hear the input. Capture takes the sound the device sends alongside the picture."
             : "This device sends a picture and no sound, so there is nothing to unmute. A virtual camera has no sound of its own; route it through a virtual audio device and capture that instead.";
         soundTip.SetToolTip(mute, reason);
         soundTip.SetToolTip(muteRow, reason);
+    }
+
+    // The rates a device will actually accept, rather than a list this app made up. A source arriving
+    // at a rate the device does not offer is converted by the device to one that it does, and it is
+    // that one the pin has to be opened at, so the choice belongs to the device either way.
+    private void FillSoundRates(string device)
+    {
+        if (!offered.TryGetValue(device, out var rates))
+        {
+            try { rates = CaptureDevices.SoundRates(device).ToArray(); }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException) { rates = []; }
+            if (rates.Length == 0) rates = CaptureOptions.SoundRates;
+            offered[device] = rates;
+        }
+        // The device puts what it is receiving at the head of its list, so that is the one to start on.
+        soundTip.SetToolTip(soundRate, $"{device} lists {rates[0]} first, which is usually what it is "
+            + "receiving right now. A rate that does not match what the device sends plays at the wrong "
+            + "speed rather than failing, so if the sound is fast or slow, try another one.");
+        var keep = rateChosen ? soundRate.Text : null;
+        var want = keep is null ? 0 : Math.Max(0, Array.IndexOf(rates, keep));
+        var listed = soundRate.Items.Cast<string>().SequenceEqual(rates);
+        if (listed && soundRate.SelectedIndex == want) return;
+        fillingRates = true;
+        try
+        {
+            if (!listed)
+            {
+                soundRate.Items.Clear();
+                soundRate.Items.AddRange(rates.Cast<object>().ToArray());
+            }
+            soundRate.SelectedIndex = want;
+        }
+        finally { fillingRates = false; }
     }
 
     private static ComboBox Choice(string[] values)
@@ -453,7 +493,9 @@ internal sealed class MainForm : Form
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
             customSize.Text = options.CustomSize; customMode.SelectedItem = options.CustomMode;
+            if (!soundRate.Items.Contains(options.SoundRate)) soundRate.Items.Add(options.SoundRate);
             soundRate.SelectedItem = options.SoundRate;
+            rateChosen = true;
             foreach (var cell in anchorCells) cell.Checked = (string?)cell.Tag == options.Anchor;
             UpdateAspectControls();
         }

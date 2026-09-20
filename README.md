@@ -26,7 +26,7 @@ Video keeps its own shape and loops without a seam: the player repeats the file 
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Input HDR / peak | **SDR**, HDR10 / PQ → SDR, HLG → SDR · **1000** nits |
-| Sound / rate | taken from the device's own audio pin when it has one · **muted** · **44100**, 48000, 32000 Hz |
+| Sound / rate | taken from the device's own audio pin when it has one · **muted** · the rates that device offers, **its own first choice** |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
@@ -49,12 +49,19 @@ asking for a rate and not a channel count is worse than asking for nothing at al
 offers 7.1, the first format matching `48000` is the eight channel one, and two channels then arrive
 as eight. Two channels are asked for explicitly, and the rate with them.
 
-**Sound rate** has to match what the device actually sends. Measured on a Live Gamer BOLT (GC555): it
-advertises 48000 and 32000 alongside 44100, but when opened at 48000 it keeps sending 44100 samples a
-second under the 48000 label, so ten seconds of sound arrives in 9.19 - 8.8% fast, which is exactly
-44100/48000. Nothing here compensates for that. A device that misreports its own format is not
-something to build a correction around, and a correction would be wrong on every device that does not
-need it. Leave the rate at what the card really sends; on that card, 44100.
+**Sound rate** lists what that device's pin actually offers, read off the device rather than made up
+here, and it starts on the device's own first choice. That first entry is worth trusting: a card
+reorders its list as the incoming signal changes, so the head of it is usually what it is receiving
+right now. Once you pick a rate yourself it is kept.
+
+The rate has to match what the device really sends, and a mismatch plays at the wrong speed rather
+than failing outright, which is what wrong-sounding capture audio usually turns out to be. Measured on
+a Live Gamer BOLT (GC555) with a 44.1kHz source: opened at 48000 it kept sending 44100 samples a
+second under the 48000 label, so ten seconds of sound arrived in 9.19 - 8.8% fast, exactly 44100/48000.
+The same card fed 96kHz converts down and is right at 48000, and 96000 never appears in the list
+because the pin does not offer it. Nothing here compensates for any of that. The device is the only
+thing that knows what it is sending, it says so by what it lists first, and a correction built for one
+card would be wrong on every card that does not need it.
 
 The picture and the sound travel separately, so they are not locked together to the sample. The sound
 is buffered by the capture buffer value, the same dial that trades latency for a steady picture.
@@ -221,9 +228,10 @@ for on the same input as the picture, and OBS's virtual camera has no sound at a
 audio device to go with the camera - so the checkbox greys out and says so.
 
 The sound format is now stated in full, two channels and a rate, because asking for a rate alone let
-the engine pick the pin's eight channel layout. Measured on the same card: it advertises 48000 but
-sends 44100 under that label, 8.8% fast. That is left uncorrected and documented; the rate is a
-setting so it can be matched to whatever the device really does.
+the engine pick the pin's eight channel layout. The rates offered come from the device itself and start
+on whichever it lists first, which tracks the signal it is receiving. Measured on the same card with a
+44.1kHz source: opened at 48000 it sends 44100 under that label, 8.8% fast. That is left uncorrected
+and documented, because only the device knows what it is really sending.
 
 2026-09-20, 1.1.0, video parity. The video path caught up with capture. It takes the same output resolution,
 mapping and screen position, placed by the same arithmetic against the shape the file turns out to be,

@@ -19,7 +19,12 @@ internal sealed record CaptureOptions(
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
     // What the sound pin is opened at. It has to be said out loud, like every other input format here:
     // a card offers several and the engine would otherwise take whichever it happens to list first.
+    // The choices come from the device, so this is only what to show before one has been asked.
     public static readonly string[] SoundRates = ["44100", "48000", "32000"];
+    // Any rate a device might offer, rather than only the ones listed above: the list is the device's
+    // to decide, and rejecting a rate it named would be this app overruling the thing it is reading.
+    public static string CleanRate(string? rate) =>
+        int.TryParse(rate, out var hertz) && hertz >= 8000 && hertz <= 768000 ? hertz.ToString() : SoundRates[0];
 
     public CaptureOptions Normalize()
     {
@@ -37,7 +42,7 @@ internal sealed record CaptureOptions(
             HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
             layout.CustomSize, layout.CustomMode, layout.Anchor,
             (Audio ?? "").Trim(),
-            SoundRates.Contains(SoundRate) ? SoundRate : SoundRates[0]);
+            CleanRate(SoundRate));
     }
 
     // An audio device the engine named, or empty for a silent capture. It is kept apart from the video
