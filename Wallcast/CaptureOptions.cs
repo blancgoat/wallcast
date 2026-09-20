@@ -8,7 +8,7 @@ internal sealed record CaptureOptions(
     string ColorSpace = "Rec.709", string ColorRange = "Limited", string Aspect = "Input resolution",
     string DynamicRange = "SDR", string HdrPeak = "1000",
     string CustomSize = "1920x1080", string CustomMode = "Fill, cropping the overflow", string Anchor = "Center",
-    string Audio = "", string Follow = "Relaxed")
+    string Audio = "", string Sound = "Off")
 {
     public static readonly string[] Formats = ["NV12", "YUY2", "UYVY", "RGB24", "MJPEG"];
     public static readonly string[] Resolutions = ["1920x1080", "1280x720", "3840x2160", "2560x1440", "1920x1200", "1600x1200", "1024x768", "640x480"];
@@ -17,19 +17,25 @@ internal sealed record CaptureOptions(
     public static readonly string[] ColorRanges = ["Limited", "Full"];
     public static readonly string[] DynamicRanges = ["SDR", "HDR10 / PQ → SDR", "HLG → SDR"];
     public static readonly string[] HdrPeaks = ["1000", "400", "600", "1600", "4000"];
-    // How hard to watch for the source changing its sample rate. Asking the device costs about a tenth
-    // of a millisecond once the pin is held, so even the eager setting is far below anything that would
-    // show up; the reason to have the choice at all is that it is a call into a driver, and not every
-    // driver is as quick as the one this was measured on.
-    public const string FollowOff = "Off", FollowRelaxed = "Relaxed", FollowEager = "Eager";
-    public static readonly string[] Follows = [FollowRelaxed, FollowEager, FollowOff];
-    // Interval, and how many asks in a row have to disagree. The eager setting takes four of them so
-    // that a track boundary, where a device can sit between rates for a moment, is not mistaken for a
-    // change; that still settles it inside half a second.
+    // One setting for the whole of sound, because muting while still following the source was two
+    // knobs describing one intention. It reads as how much you want: nothing at all, which asks the
+    // device for no audio and costs nothing; sound as the device gave it when Apply was pressed; or
+    // sound that keeps up with a source changing its sample rate between tracks, at the price of
+    // asking the device how it is doing, every two seconds or every four hundred milliseconds.
+    public const string SoundOff = "Off", SoundOn = "On", SoundFollowing = "On, following the source",
+        SoundClosely = "On, following closely";
+    public static readonly string[] Sounds = [SoundOff, SoundOn, SoundFollowing, SoundClosely];
+    // The two a video file can make sense of; the rest are about a device changing its mind.
+    public static readonly string[] FileSounds = [SoundOff, SoundOn];
+    // Interval, and how many asks in a row have to disagree, two being enough to sit out the moment a
+    // device spends between rates at a track boundary. An ask means building a filter, about eight
+    // milliseconds of one background thread, so the close setting is four hundred milliseconds rather
+    // than the hundred it could be if the answer could be cached - it cannot, because a driver settles
+    // its list when the filter is built and a kept one goes on answering about the old signal.
     [System.Text.Json.Serialization.JsonIgnore]
-    public (int Every, int Before) Watch => Follow == FollowEager ? (100, 4) : (2000, 2);
+    public (int Every, int Before) Watch => Sound == SoundClosely ? (400, 2) : (2000, 2);
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool Following => HasSound && Follow != FollowOff;
+    public bool Following => HasSound && Sound is SoundFollowing or SoundClosely;
 
     public CaptureOptions Normalize()
     {
@@ -47,14 +53,14 @@ internal sealed record CaptureOptions(
             HdrPeaks.Contains(HdrPeak) ? HdrPeak : "1000",
             layout.CustomSize, layout.CustomMode, layout.Anchor,
             (Audio ?? "").Trim(),
-            Follows.Contains(Follow) ? Follow : FollowRelaxed);
+            Sounds.Contains(Sound) ? Sound : SoundOff);
     }
 
     // An audio device the engine named, or empty for a silent capture. It is kept apart from the video
     // device because the two need not be the same thing: a capture card carries its own sound, while a
     // virtual camera has none at all and has to borrow a virtual audio device.
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool HasSound => Audio.Length > 0;
+    public bool HasSound => Audio.Length > 0 && Sound != SoundOff;
 
     // The geometry half of these settings, in the form both inputs share.
     [System.Text.Json.Serialization.JsonIgnore]

@@ -18,9 +18,7 @@ internal sealed class Playback : IDisposable
     private long driftBytes, driftAt;
     private int offBand, reopens, disagreed;
     private bool reopening, deaf;
-    // Held for the life of the capture, not rebuilt per ask: finding the pin is most of the cost and
-    // the pin does not move, only its answer does.
-    private SoundFormats? asking;
+    private bool querying;
     // What the device says it is receiving, which is not the same as what the pin was opened at.
     public int SoundOffered { get; private set; }
     private DesktopHost? host;
@@ -177,7 +175,6 @@ internal sealed class Playback : IDisposable
         // touches belong to this apartment. Two seconds apart, and only while there is sound to keep
         // right - a muted capture has nothing to follow.
         if (deaf || !options.Following) return;
-        asking ??= new SoundFormats(device.Device);
         var watch = options.Watch;
         listen = new System.Threading.Timer(_ => Post(current, () => CheckOffered(current, screen, watch.Before)), null, watch.Every, watch.Every);
     }
@@ -191,11 +188,26 @@ internal sealed class Playback : IDisposable
     // negotiated when playback started, which is what it did before any of this existed.
     private void CheckOffered(int current, Screen screen, int before)
     {
-        if (capture is null || live is null || listen is null || asking is null || reopening) return;
+        if (capture is null || live is null || listen is null || reopening || querying) return;
         if (capture.SoundRate <= 0) return;
-        List<int> offered;
-        try { offered = asking.Offered(); }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException) { offered = []; }
+        // Built fresh every time, because a driver settles its list when the filter is built and a kept
+        // one goes on answering about the signal that was arriving when it was kept. That costs about
+        // eight milliseconds, which is why it is not done on the thread that is presenting frames.
+        querying = true;
+        var name = live.Device;
+        Task.Run(() =>
+        {
+            List<int> answer;
+            try { answer = SoundFormats.Rates(name); }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException) { answer = []; }
+            Post(current, () => Settle(answer, current, screen, before));
+        });
+    }
+
+    private void Settle(List<int> offered, int current, Screen screen, int before)
+    {
+        querying = false;
+        if (capture is null || listen is null || reopening) return;
         if (offered.Count == 0)
         {
             deaf = true;
@@ -363,8 +375,7 @@ internal sealed class Playback : IDisposable
         surface = null;
         capture?.Dispose();
         capture = null;
-        asking?.Dispose();
-        asking = null;
+        querying = false;
         live = null;
         source = null;
     }

@@ -22,18 +22,26 @@ internal sealed class SoundFormats : IDisposable
     private static readonly Guid AudioCategory = new("33d9a762-90c8-11d0-bd43-00a0c9118956");
 
     private readonly string device;
+    private readonly bool hold;
+    private IMoniker? found;
+    private Guid where;
     private object? filter;
     private IAMStreamConfig? config;
     private IntPtr scratch;
     private int capabilities;
     private bool hopeless;
 
-    // Finding the pin means enumerating every capture device and building a filter, which is most of
-    // the eight milliseconds the first ask costs. Asked again every fraction of a second, that would
-    // be waste: the pin itself is what changes its answer, not which pin it is, so it is kept.
-    public SoundFormats(string device) => this.device = device;
+    // Which device, and whether to keep the filter between asks. Keeping it is far cheaper and quite
+    // possibly wrong: a driver may settle its format list when the filter is built, in which case a
+    // kept filter keeps answering about the signal that was arriving when it was built. Finding the
+    // device is cached either way, since which device it is does not change.
+    public SoundFormats(string device, bool hold = false)
+    {
+        this.device = device;
+        this.hold = hold;
+    }
 
-    // One ask, for a caller that has no reason to hold anything.
+    // One ask from nothing, finding the device again as well.
     public static List<int> Rates(string device)
     {
         using var once = new SoundFormats(device);
@@ -54,12 +62,14 @@ internal sealed class SoundFormats : IDisposable
         }
         catch (COMException) { Forget(); }
         catch (InvalidCastException) { Forget(); }
+        finally { if (!hold) Release(); }
         return rates;
     }
 
     // A device that is unplugged and plugged back in is a different filter, so a failed ask throws the
     // cached one away rather than answering wrongly for the rest of the session.
-    private void Forget()
+    // Everything but the device itself, which is what the next ask will build on again.
+    private void Release()
     {
         if (scratch != IntPtr.Zero) { Marshal.FreeCoTaskMem(scratch); scratch = IntPtr.Zero; }
         if (config is not null) { Marshal.ReleaseComObject(config); config = null; }
@@ -67,21 +77,37 @@ internal sealed class SoundFormats : IDisposable
         capabilities = 0;
     }
 
+    private void Forget()
+    {
+        Release();
+        if (found is not null) { Marshal.ReleaseComObject(found); found = null; }
+    }
+
     private void Find()
     {
+        if (found is not null && Build(found, where)) return;
         // A card carries its sound on a pin of the video device, so that category comes first; a plain
         // audio device is only reached through the other one.
         foreach (var category in new[] { VideoCategory, AudioCategory })
         {
-            filter = Bind(device, category);
-            if (filter is null) continue;
-            if (Locate(filter)) return;
-            Marshal.ReleaseComObject(filter);
-            filter = null;
+            var moniker = Locate(device, category);
+            if (moniker is null) continue;
+            if (Build(moniker, category)) { found = moniker; where = category; return; }
+            Marshal.ReleaseComObject(moniker);
         }
     }
 
-    private bool Locate(object built)
+    private bool Build(IMoniker moniker, Guid category)
+    {
+        filter = Bind(moniker);
+        if (filter is null) return false;
+        if (Pin(filter)) return true;
+        Marshal.ReleaseComObject(filter);
+        filter = null;
+        return false;
+    }
+
+    private bool Pin(object built)
     {
         if (((IBaseFilter)built).EnumPins(out var pins) != 0 || pins is null) return false;
         try
@@ -140,7 +166,18 @@ internal sealed class SoundFormats : IDisposable
         Marshal.FreeCoTaskMem(held);
     }
 
-    private static object? Bind(string device, Guid category)
+    private static object? Bind(IMoniker moniker)
+    {
+        try
+        {
+            var iid = typeof(IBaseFilter).GUID;
+            moniker.BindToObject(null!, null!, ref iid, out var built);
+            return built;
+        }
+        catch (COMException) { return null; }
+    }
+
+    private static IMoniker? Locate(string device, Guid category)
     {
         object? maker = null;
         IEnumMoniker? monikers = null;
@@ -148,19 +185,11 @@ internal sealed class SoundFormats : IDisposable
         {
             maker = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("62BE5D10-60EB-11D0-BD3B-00A0C911CE86"), true)!);
             if (((ICreateDevEnum)maker!).CreateClassEnumerator(ref category, out monikers, 0) != 0 || monikers is null) return null;
-            var found = new IMoniker[1];
-            while (monikers.Next(1, found, IntPtr.Zero) == 0)
+            var each = new IMoniker[1];
+            while (monikers.Next(1, each, IntPtr.Zero) == 0)
             {
-                var moniker = found[0];
-                try
-                {
-                    if (Named(moniker) != device) continue;
-                    var iid = typeof(IBaseFilter).GUID;
-                    moniker.BindToObject(null!, null!, ref iid, out var filter);
-                    return filter;
-                }
-                catch (COMException) { return null; }
-                finally { Marshal.ReleaseComObject(moniker); }
+                if (Named(each[0]) == device) return each[0];
+                Marshal.ReleaseComObject(each[0]);
             }
         }
         catch (COMException) { }

@@ -12,9 +12,11 @@ internal sealed class MainForm : Form
     private readonly ComboBox devices = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox monitors = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly NumericUpDown cache = new() { Minimum = 50, Maximum = 2000, Increment = 50, Value = 150 };
-    private readonly CheckBox mute = new() { Text = "Mute", Checked = true, AutoSize = true };
+    // One control for the whole of sound. Muting while still following a source that changes rate was
+    // two settings saying different things about the same intention.
+    private readonly ComboBox sound = Choice(CaptureOptions.Sounds);
     // A disabled control gets no mouse messages, so the reason it is disabled has to hang on a parent.
-    private readonly FlowLayoutPanel muteRow = Row();
+    private readonly FlowLayoutPanel soundRow = Row();
     private readonly ToolTip soundTip = new() { ShowAlways = true, AutoPopDelay = 15000, InitialDelay = 350 };
     // Which devices the engine says can hand over sound. A capture card carries its own on a pin of the
     // video device; a virtual camera has none, and asking it for sound would cost the picture too.
@@ -50,7 +52,6 @@ internal sealed class MainForm : Form
     private readonly Label geometry = new() { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0), Margin = new Padding(0, 8, 0, 0) };
     private readonly ComboBox dynamicRange = Choice(CaptureOptions.DynamicRanges);
     private readonly ComboBox hdrPeak = Choice(CaptureOptions.HdrPeaks);
-    private readonly ComboBox follow = Choice(CaptureOptions.Follows);
 
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer watchdog = new() { Interval = 2000 };
@@ -93,7 +94,6 @@ internal sealed class MainForm : Form
         AddCaptureSetting("Color range", colorRange);
         AddCaptureSetting("Input HDR", dynamicRange);
         AddCaptureSetting("HDR peak (nits)", hdrPeak);
-        AddCaptureSetting("Follow source rate", follow);
         AddLayoutSetting("Display aspect", aspect);
         AddLayoutSetting("Output size (W x H)", customSize);
         AddLayoutSetting("Output mapping", customMode);
@@ -138,10 +138,12 @@ internal sealed class MainForm : Form
         body.Controls.Add(Caption("Output monitor"));
         monitors.Width = 490;
         body.Controls.Add(monitors);
-        muteRow.Margin = new Padding(0, 14, 0, 10);
-        muteRow.Controls.Add(mute);
-        body.Controls.Add(muteRow);
-        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · sound is off until you clear Mute", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
+        soundRow.Margin = new Padding(0, 14, 0, 10);
+        soundRow.Controls.Add(new Label { Text = "Sound", AutoSize = true, Padding = new Padding(0, 5, 14, 0) });
+        sound.Width = 380;
+        soundRow.Controls.Add(sound);
+        body.Controls.Add(soundRow);
+        body.Controls.Add(new Label { Text = "Keeps the source shape unless told otherwise · video loops without a seam · sound starts off and is one setting", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(490, 0) });
         var actions = Row();
         actions.Margin = new Padding(0, 20, 0, 12);
         actions.Controls.Add(Button("Apply to desktop", Apply));
@@ -153,7 +155,9 @@ internal sealed class MainForm : Form
         path.TextChanged += (_, _) => ProbeVideo();
         monitors.SelectedIndexChanged += (_, _) => UpdateAspectControls();
         devices.SelectedIndexChanged += (_, _) => UpdateSoundControls();
-        mute.CheckedChanged += (_, _) => playback?.SetMute(mute.Checked);
+        // A file can be silenced where it stands; a device has to be re-opened to stop asking it for
+        // sound at all, which is what Apply is for, and every other capture setting works the same way.
+        sound.SelectedIndexChanged += (_, _) => { if (!Capturing) playback?.SetMute(sound.Text == CaptureOptions.SoundOff); };
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Wallcast", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
         menu.Items.Add("Stop wallpaper", null, (_, _) => Stop());
@@ -259,7 +263,7 @@ internal sealed class MainForm : Form
                 input = new VideoSource(path.Text, SelectedPlacement(), videoFrame);
             }
             status.Text = "Opening the input…";
-            playback.Start(input, screens[monitors.SelectedIndex], mute.Checked);
+            playback.Start(input, screens[monitors.SelectedIndex], sound.Text == CaptureOptions.SoundOff);
             SaveSettings();
         }
         catch (Exception ex) { status.Text = ex.Message; }
@@ -272,7 +276,7 @@ internal sealed class MainForm : Form
         parent?.SuspendLayout();
         fileRow.Visible = !Capturing;
         captureRow.Visible = cacheRow.Visible = captureSettings.Visible = Capturing;
-        mute.Enabled = !Capturing;
+
         if (parent is not null) parent.Controls.SetChildIndex(captureRow, parent.Controls.GetChildIndex(mode) + 1);
         parent?.ResumeLayout(true);
         // The frame a placement applies to changes with the mode, so the readout has to be redone.
@@ -284,22 +288,30 @@ internal sealed class MainForm : Form
     private void UpdateSoundControls()
     {
         var available = !Capturing || DeviceHasSound;
-        mute.Enabled = available;
-        follow.Enabled = Capturing && DeviceHasSound;
-        soundTip.SetToolTip(follow, follow.Enabled
-            ? "A source that changes sample rate between tracks needs the sound re-opened, which freezes "
-                + "the picture for about a second and a half. Relaxed asks the device every two seconds, "
-                + "Eager ten times a second, and Off leaves the sound on whatever it was given when you "
-                + "pressed Apply. Even Eager costs about a tenth of a millisecond an ask and starts "
-                + "nothing; the reason to turn it down is that it is a call into the device's driver."
-            : "Only a device that sends sound has a rate to follow.");
-
-        var reason = available
-            ? "Clear this to hear the input. Capture takes the sound the device sends alongside the picture, "
-                + "in whatever format the device is sending it, which it settles when playback starts."
-            : "This device sends a picture and no sound, so there is nothing to unmute. A virtual camera has no sound of its own; route it through a virtual audio device and capture that instead.";
-        soundTip.SetToolTip(mute, reason);
-        soundTip.SetToolTip(muteRow, reason);
+        sound.Enabled = available;
+        // The two following entries are about a device changing its mind mid-stream, which a file on
+        // disk never does, so in video mode they are not offered at all.
+        var offered = Capturing ? CaptureOptions.Sounds : CaptureOptions.FileSounds;
+        if (!sound.Items.Cast<string>().SequenceEqual(offered))
+        {
+            var chosen = sound.Text;
+            sound.Items.Clear();
+            sound.Items.AddRange(offered.Cast<object>().ToArray());
+            sound.SelectedIndex = Math.Max(0, Array.IndexOf(offered, chosen));
+        }
+        var reason = !available
+            ? "This device sends a picture and no sound, so there is nothing to turn on. A virtual camera "
+                + "has no sound of its own; route it through a virtual audio device and capture that instead."
+            : !Capturing
+                ? "Whether the video file is heard. It can be changed while it plays."
+                : "Off asks the device for no sound at all and costs nothing. On takes the sound the device "
+                + "is sending when you press Apply and leaves it there. The two following entries re-open "
+                + "the sound when the source changes its sample rate between tracks, which freezes the "
+                + "picture for about a second and a half: following settles within four seconds and costs "
+                + "well under a percent of a core, following closely settles within one and costs under two. "
+                + "Like every other capture setting, it takes effect on Apply.";
+        soundTip.SetToolTip(sound, reason);
+        soundTip.SetToolTip(soundRow, reason);
     }
 
     private static ComboBox Choice(string[] values)
@@ -377,7 +389,7 @@ internal sealed class MainForm : Form
     // taken whenever the device offers it and silenced by Mute, which keeps the toggle instant: asking
     // the engine for it only on demand would mean restarting the capture every time it is clicked.
     private CaptureOptions SelectedCaptureOptions() => new(format.Text, resolution.Text, fps.Text, colorSpace.Text, colorRange.Text, aspect.Text, dynamicRange.Text, hdrPeak.Text, customSize.Text, customMode.Text, SelectedAnchor,
-        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "", follow.Text);
+        Capturing && DeviceHasSound ? (string)devices.SelectedItem! : "", sound.Text);
     private Placement SelectedPlacement() => new Placement(aspect.Text, customSize.Text, customMode.Text, SelectedAnchor).Normalize();
     // The .ico carries a drawing per size, so ask for the one that fits rather than scaling one down.
     private static Icon LoadIcon(int size)
@@ -439,7 +451,7 @@ internal sealed class MainForm : Form
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(mode.Text, path.Text, devices.SelectedItem as string, screens[monitors.SelectedIndex].DeviceName, (int)cache.Value, mute.Checked, SelectedCaptureOptions())));
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(mode.Text, path.Text, devices.SelectedItem as string, screens[monitors.SelectedIndex].DeviceName, (int)cache.Value, SelectedCaptureOptions())));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { status.Text = "Playing · could not save settings: " + ex.Message; }
     }
@@ -456,18 +468,18 @@ internal sealed class MainForm : Form
             if (saved.Device is not null && devices.Items.Contains(saved.Device)) devices.SelectedItem = saved.Device;
             var index = Array.FindIndex(screens, s => s.DeviceName == saved.Monitor);
             if (index >= 0) monitors.SelectedIndex = index;
-            cache.Value = Math.Clamp(saved.Cache, 50, 2000); mute.Checked = saved.Mute;
+            cache.Value = Math.Clamp(saved.Cache, 50, 2000);
             var options = (saved.Capture ?? new CaptureOptions()).Normalize();
             format.SelectedItem = options.Format; resolution.SelectedItem = options.Resolution;
             fps.SelectedItem = options.Fps; colorSpace.SelectedItem = options.ColorSpace;
             colorRange.SelectedItem = options.ColorRange; aspect.SelectedItem = options.Aspect;
             dynamicRange.SelectedItem = options.DynamicRange; hdrPeak.SelectedItem = options.HdrPeak;
             customSize.Text = options.CustomSize; customMode.SelectedItem = options.CustomMode;
-            follow.SelectedItem = options.Follow;
+            if (sound.Items.Contains(options.Sound)) sound.SelectedItem = options.Sound;
             foreach (var cell in anchorCells) cell.Checked = (string?)cell.Tag == options.Anchor;
             UpdateAspectControls();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { status.Text = "Could not read saved settings, started with defaults."; }
     }
-    private sealed record Settings(string Mode, string Path, string? Device, string Monitor, int Cache, bool Mute, CaptureOptions? Capture = null);
+    private sealed record Settings(string Mode, string Path, string? Device, string Monitor, int Cache, CaptureOptions? Capture = null);
 }

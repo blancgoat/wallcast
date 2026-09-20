@@ -48,10 +48,11 @@ internal static class Program
                 // Sound follows the device: a card sends its own alongside the picture, a virtual camera
                 // sends none, and a checkbox that cannot do anything has to say why.
                 if (!soundTip.ShowAlways) throw new Exception("The sound explanation would stay hidden unless the window is active");
-                var silence = (CheckBox)Field("mute");
+                var silence = (ComboBox)Field("sound");
                 chooser.SelectedIndex = 1;
                 Application.DoEvents();
-                if (!silence.Enabled) throw new Exception("A video file always has sound to mute");
+                if (!silence.Enabled) throw new Exception("A video file always has sound to turn on or off");
+                if (silence.Items.Count != CaptureOptions.FileSounds.Length) throw new Exception("A video file was offered settings only a device can use");
                 chooser.SelectedIndex = 0;
                 var box = (ComboBox)Field("devices");
                 foreach (string device in box.Items)
@@ -60,8 +61,9 @@ internal static class Program
                     Application.DoEvents();
                     var why = soundTip.GetToolTip(silence) ?? "";
                     if (why.Length < 40) throw new Exception($"{device} leaves the mute box unexplained: " + why);
-                    if (!silence.Enabled && !why.Contains("no sound")) throw new Exception($"{device} greys the box out without saying so: " + why);
-                    Console.WriteLine($"PASS: {device} · mute {(silence.Enabled ? "live" : "greyed")}");
+                    if (!silence.Enabled && !why.Contains("no sound")) throw new Exception($"{device} greys the setting out without saying so: " + why);
+                    if (silence.Enabled && silence.Items.Count != CaptureOptions.Sounds.Length) throw new Exception($"{device} was not offered every sound setting");
+                    Console.WriteLine($"PASS: {device} · sound {(silence.Enabled ? "live with " + silence.Items.Count + " settings" : "greyed")}");
                 }
                 return 0;
             }
@@ -196,12 +198,19 @@ internal static class Program
                 var cold = Stopwatch.StartNew();
                 for (var i = 0; i < 50; i++) SoundFormats.Rates(device);
                 Console.WriteLine($"50 asks finding the pin each time: {cold.Elapsed.TotalMilliseconds / 50:F2} ms each");
-                using (var held = new SoundFormats(device))
+                using (var rebuilt = new SoundFormats(device))
+                {
+                    rebuilt.Offered();
+                    var warm = Stopwatch.StartNew();
+                    for (var i = 0; i < 200; i++) rebuilt.Offered();
+                    Console.WriteLine($"200 asks rebuilding the filter, device cached: {warm.Elapsed.TotalMilliseconds / 200:F3} ms each");
+                }
+                using (var held = new SoundFormats(device, hold: true))
                 {
                     held.Offered();
                     var warm = Stopwatch.StartNew();
                     for (var i = 0; i < 500; i++) held.Offered();
-                    Console.WriteLine($"500 asks holding the pin: {warm.Elapsed.TotalMilliseconds / 500:F3} ms each");
+                    Console.WriteLine($"500 asks holding the filter: {warm.Elapsed.TotalMilliseconds / 500:F3} ms each");
                 }
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
@@ -221,8 +230,8 @@ internal static class Program
                 var audible = CaptureDevices.EnumerateAudio();
                 Console.WriteLine($"DEVICES: {audible.Count} can send sound: {string.Join(", ", audible)}");
                 var settings = new CaptureOptions(Audio: audible.Contains(device) ? device : "",
-                    Follow: args.Contains("--eager") ? CaptureOptions.FollowEager : CaptureOptions.FollowRelaxed).Normalize();
-                if (args.Contains("--follow")) Console.WriteLine($"FOLLOW: {settings.Follow}, asking every {settings.Watch.Every}ms, acting after {settings.Watch.Before}");
+                    Sound: args.Contains("--eager") ? CaptureOptions.SoundClosely : CaptureOptions.SoundFollowing).Normalize();
+                if (args.Contains("--follow")) Console.WriteLine($"FOLLOW: {settings.Sound}, asking every {settings.Watch.Every}ms, acting after {settings.Watch.Before}");
                 if (!settings.HasSound) { Console.WriteLine($"SKIP: {device} sends no sound"); return 0; }
                 using var dispatcher = new Control();
                 _ = dispatcher.Handle;
@@ -235,6 +244,8 @@ internal static class Program
                 // and the next Playing line is what the picture spends frozen.
                 var watching = args.Contains("--follow") ? 600 : 5;
                 Console.WriteLine($"{clock.Elapsed.TotalSeconds,6:F1}s watching for {watching}s" + (watching > 10 ? "; change the source rate whenever you like" : ""));
+                using var fresh = new SoundFormats(device, hold: false);
+                using var stuck = new SoundFormats(device, hold: true);
                 var told = 0.0;
                 while (clock.Elapsed.TotalSeconds < watching)
                 {
@@ -244,9 +255,12 @@ internal static class Program
                     // that had nothing to fire at.
                     if (watching <= 10 || clock.Elapsed.TotalSeconds - told < 5) continue;
                     told = clock.Elapsed.TotalSeconds;
-                    if (live.SoundArriving > 0)
-                        Console.WriteLine($"{told,6:F1}s arriving {live.SoundArriving:F0} Hz" +
-                            (live.SoundOffered > 0 ? $", device offering {live.SoundOffered} Hz" : ""));
+                    if (live.SoundArriving <= 0) continue;
+                    // Three ways of asking the same question, so one change of source says which of
+                    // them actually tracks it: from nothing, rebuilding the filter, and holding it.
+                    var scratchRates = SoundFormats.Rates(device);
+                    Console.WriteLine($"{told,6:F1}s arriving {live.SoundArriving:F0} Hz · app says {live.SoundOffered} · " +
+                        $"from nothing {(scratchRates.Count > 0 ? scratchRates[0] : 0)} · rebuilt {Head(fresh)} · held {Head(stuck)}");
                 }
                 // Muting must not disturb the picture, which is why the sound is captured either way.
                 live.SetMute(true);
@@ -534,7 +548,7 @@ internal static class Program
             // Sound rides the same input as the picture, because a card will not hand it over as a
             // device of its own, and it leaves on stdout, which the picture is far too big for.
             var silent = new CaptureOptions().Normalize();
-            var loud = (new CaptureOptions() with { Audio = "Live Gamer BOLT" }).Normalize();
+            var loud = (new CaptureOptions() with { Audio = "Live Gamer BOLT", Sound = CaptureOptions.SoundOn }).Normalize();
             var quietRun = silent.CreateStartInfo("Some Card", 150, "pipe");
             var loudRun = loud.CreateStartInfo("Some Card", 150, "pipe");
             var quietArgs = string.Join(" ", quietRun.ArgumentList);
@@ -550,15 +564,27 @@ internal static class Program
             if (loudArgs.Contains("-sample_rate")) throw new Exception("A rate was forced on the device instead of taking its own: " + loudArgs);
             if (!loudArgs.Contains("-ac 2")) throw new Exception("Sound could reach the player in some layout it will not be played in: " + loudArgs);
             if (quietArgs.Contains("-channels")) throw new Exception("A silent capture negotiated a sound format: " + quietArgs);
-            // Following the source costs an ask into the device, so it is a choice, and Off has to mean off.
-            if (silent.Following) throw new Exception("A silent capture was going to watch for rate changes");
-            if (!loud.Following) throw new Exception("A capture with sound was not going to follow the source");
-            if ((loud with { Follow = CaptureOptions.FollowOff }).Normalize().Following) throw new Exception("Off did not turn it off");
-            var relaxed = loud.Watch;
-            var eager = (loud with { Follow = CaptureOptions.FollowEager }).Normalize().Watch;
+            // One setting covers the whole of sound. Off asks the device for none, so it is not merely
+            // silent: nothing is captured, nothing is watched, nothing is spent.
+            if (silent.HasSound || silent.Following) throw new Exception("A silent capture was going to ask for sound");
+            if (!loud.HasSound) throw new Exception("A capture told to make sound asked for none");
+            if (loud.Following) throw new Exception("Plain On should not be watching the device");
+            var off = (loud with { Sound = CaptureOptions.SoundOff }).Normalize();
+            if (off.HasSound || off.Following) throw new Exception("Off did not turn it off");
+            if (off.CreateStartInfo("Some Card", 150, "pipe").ArgumentList.Contains("-channels"))
+                throw new Exception("Off still negotiated a sound format");
+            var keepingUp = (loud with { Sound = CaptureOptions.SoundFollowing }).Normalize();
+            var closely = (loud with { Sound = CaptureOptions.SoundClosely }).Normalize();
+            if (!keepingUp.Following || !closely.Following) throw new Exception("The following settings were not following");
+            // A file has no device to change its mind, so it is offered only the two that mean anything.
+            if (CaptureOptions.FileSounds.Length != 2 || CaptureOptions.FileSounds[0] != CaptureOptions.SoundOff)
+                throw new Exception("A video file should be offered only off and on");
+            var relaxed = keepingUp.Watch;
+            var eager = closely.Watch;
             if (relaxed.Every <= eager.Every) throw new Exception("Eager is not more eager than relaxed");
-            // Both settle in well under the second and a half a re-open itself takes.
-            if (eager.Every * eager.Before > 600 || relaxed.Every * relaxed.Before > 5000)
+            // Eager has to settle inside the second and a half the re-open itself takes, or it is not
+            // buying anything; relaxed only has to stay in the same order of magnitude as a track.
+            if (eager.Every * eager.Before > 1000 || relaxed.Every * relaxed.Before > 5000)
                 throw new Exception($"Settling takes {eager.Every * eager.Before}ms eager, {relaxed.Every * relaxed.Before}ms relaxed");
             if (!loudRun.RedirectStandardOutput) throw new Exception("Nothing is listening on the engine's stdout");
             if (!loudArgs.Contains("-map 0:v")) throw new Exception("The picture lost its own mapping once sound was added");
@@ -617,6 +643,12 @@ internal static class Program
             for (var x = 0; x < 8; x++)
             { var pixel = Swatch.GetPixel(x, y); r += pixel.R; g += pixel.G; b += pixel.B; }
         return (r / 64 << 16) | (g / 64 << 8) | b / 64;
+    }
+
+    private static int Head(SoundFormats source)
+    {
+        var rates = source.Offered();
+        return rates.Count > 0 ? rates[0] : 0;
     }
 
     // How far the picture reaches inside the window it was given, walked in from all four edges.

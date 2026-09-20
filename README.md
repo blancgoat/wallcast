@@ -26,8 +26,7 @@ Video keeps its own shape and loops without a seam: the player repeats the file 
 | Color space | **Rec.709**, Rec.601, Rec.2020 (SDR conversion matrix) |
 | Color range | **Limited**, Full |
 | Input HDR / peak | **SDR**, HDR10 / PQ → SDR, HLG → SDR · **1000** nits |
-| Sound | taken from the device's own audio pin when it has one, in whatever format the device is sending · **muted** |
-| Follow source rate | **Relaxed** (every 2s), Eager (ten times a second), Off |
+| Sound | **Off**, On, On following the source, On following closely |
 
 Nothing is guessed. The device is opened with exactly the values you chose and YUV→RGB uses exactly the matrix you chose. If the device does not support a combination you get an error rather than a silent switch to another format. The YUV matrix and range selections do not affect RGB input. Rec.2020 does not mean HDR tone mapping. Press **Apply to desktop** for a change to take effect; settings persist across runs. The lists are common presets — querying a device for its own supported modes is not implemented yet.
 
@@ -35,7 +34,18 @@ For a Live Gamer BOLT, start with **NV12 / 1920×1080 / 60 / Rec.709 / Limited /
 
 ### Sound
 
-Everything starts muted. Clear **Mute** to hear the input.
+Everything starts silent. **Sound** is one setting, because muting an input while still asking the
+device how its sound is doing was two knobs describing one intention:
+
+- `Off` asks the device for no sound at all. Nothing is captured, nothing is watched, nothing is spent.
+- `On` takes the sound the device is sending when you press Apply and leaves it there.
+- `On, following the source` re-opens the sound when the source changes its sample rate, settling
+  within four seconds.
+- `On, following closely` does the same within one second, for a source that changes rate track by
+  track.
+
+A video file gets only the first two: a file on disk does not change its mind halfway through, and its
+setting takes effect where it stands rather than on Apply.
 
 A capture device's sound comes off the device itself, on a pin beside the picture, and there is nothing
 separate to choose: it is taken whenever the device offers any and silenced by the checkbox, which is
@@ -72,17 +82,17 @@ sound shares its input with the picture that re-opens both: the picture freezes 
 about a second and a half. It does not go black or show the wallpaper through, because the window and
 its swap chain stay where they are and only the engine underneath is replaced.
 
-How hard to watch is **Follow source rate**. Relaxed asks the device every two seconds and acts on two
-answers in a row, so a change settles within four seconds; Eager asks ten times a second and takes four
-in a row, settling within half of one. Off leaves the sound on whatever it was given when Apply was
-pressed. Eager is worth it when the source changes rate between tracks, because it is the part before
-the re-open that sounds wrong, and it shortens that tenfold; the second and a half of frozen picture
-belongs to the re-open and no setting shortens it.
+The two following settings differ in how often they ask: every two seconds, or every four hundred
+milliseconds, both acting on two answers in a row so that a track boundary is not mistaken for a change.
+Following closely is worth it when the source changes rate track by track, because it is the stretch
+before the re-open that sounds wrong and this shortens it fivefold. The second and a half of frozen
+picture belongs to the re-open itself and no setting shortens it.
 
-Cost is not really the reason to turn it down. The pin is found once and kept, which takes an ask from
-8.84ms to **0.088ms** measured, so Relaxed runs at four thousandths of a percent of a core and Eager at
-nine hundredths. The reason the choice exists is that an ask is a call into the device's driver, and not
-every driver need be as quick as the one that was measured.
+An ask means building a DirectShow filter, measured at **8.2ms** on one background thread, so following
+costs under half a percent of a core and following closely under two. Holding the filter between asks
+would make it a hundred times cheaper and was tried; it does not work, because a driver settles its
+format list when the filter is built and a kept one goes on answering about the signal that was arriving
+when it was kept - it updates eventually, hours apart, which is worse than not updating at all.
 
 Two things say that the source has changed. What arrives per second stops matching the rate the pin
 claims, which catches a card that keeps sending its old rate under the new label and is free to notice
@@ -207,7 +217,7 @@ licence and where its source lives. Keep both in any archive you distribute.
 - `Playback.cs`: picks the playback path per input, LibVLC video playback, seamless looping, the crop and display aspect it hands the player, errors and cleanup.
 - `VideoProbe.cs`: reads a video file's displayed shape out of the bundled FFmpeg, so a file can be placed like a capture.
 - `SoundStream.cs`: reads the engine's stdout as fast as it is written, so the engine never waits on the player and what the device is really sending can be counted.
-- `SoundFormats.cs`: asks a device what its sound pin offers, in this process, so a source that changes sample rate can be followed without launching anything. The pin is found once and held, which is the difference between 8.84ms an ask and 0.088ms.
+- `SoundFormats.cs`: asks a device what its sound pin offers, in this process, so a source that changes sample rate can be followed without launching anything. The filter is rebuilt every ask, because a kept one keeps answering about the signal it was built on.
 - `CaptureOptions.cs`: pixel format, resolution, FPS and YUV conversion, plus the crop that takes the capture card's black bars off. The geometry itself belongs to `Placement.cs`.
 - `CapturePlayback.cs`: FFmpeg DirectShow input, explicit color conversion, keeps the newest frame. Sound, when the device has any, leaves the same process on stdout as WAV and is played from that stream. Frames arrive over a named pipe. A redirected stdout pipe has a small buffer and stalls near 800 MB/s, while 4K 60fps BGRA needs 2.0 GB/s.
 - `CaptureSurface.cs`: presents BGRA frames through a DXGI flip-model swap chain and keeps the aspect ratio. Scaling runs on the GPU.
