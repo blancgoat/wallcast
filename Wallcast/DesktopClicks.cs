@@ -24,6 +24,11 @@ internal sealed class DesktopClicks : IDisposable
     // Buttons whose press was handed to Explorer. The release has to follow the press to the same
     // place, or Explorer is left believing a button is still down.
     private int explorers;
+    // A wheel does not arrive a notch at a time. A high-resolution wheel or a precision touchpad
+    // sends fractions of one - 40, 30, 12 - and dividing each of those by a notch gives zero, so a
+    // slow scroll turned into nothing at all while a fast flick worked. What is left over is kept
+    // and added to the next one.
+    private int notches;
 
     /// <summary>The picture's rectangle in screen pixels. Empty means the hook does nothing.</summary>
     public Rectangle Area { get; set; }
@@ -48,6 +53,7 @@ internal sealed class DesktopClicks : IDisposable
     {
         if (hook != IntPtr.Zero) return;
         hook = SetWindowsHookEx(MouseHook, callback, GetModuleHandle(null), 0);
+        if (Pointer.Tracing) Hooked?.Invoke($"hook installed={hook != IntPtr.Zero} area={Area} alt={RequireAlt}");
         if (hook == IntPtr.Zero) throw new InvalidOperationException("Windows would not allow the mouse hook.");
     }
 
@@ -58,6 +64,8 @@ internal sealed class DesktopClicks : IDisposable
         hook = IntPtr.Zero;
         dragging = false;
         explorers = 0;
+        notches = 0;
+        Observed = 0;
     }
 
     private IntPtr Intercept(int code, IntPtr message, IntPtr data)
@@ -70,10 +78,14 @@ internal sealed class DesktopClicks : IDisposable
         // A drag that began on the picture keeps going wherever it wanders, the way a drag does
         // everywhere else. Anything else outside the picture is not ours.
         var mine = Area.Contains(at) && OverTheDesktop(at) && (!RequireAlt || AltHeld) || dragging && action != Wheel;
+        // Buttons and the wheel are rare enough to say something about even when they are not ours;
+        // a click that vanishes is otherwise indistinguishable from a hook that never ran.
+        if (action != Move && Pointer.Tracing)
+            Hooked?.Invoke($"raw 0x{action:X3} at {at.X},{at.Y} mine={mine} area={Area} inside={Area.Contains(at)} desktop={OverTheDesktop(at)}");
         if (!mine) return CallNextHookEx(hook, code, message, data);
 
         var where = Fraction(at);
-        Hooked?.Invoke($"hook 0x{action:X3} at {at.X},{at.Y} dragging={dragging}");
+        if (Pointer.Tracing) Hooked?.Invoke($"hook 0x{action:X3} at {at.X},{at.Y} dragging={dragging}");
         switch (action)
         {
             // Never swallowed. Blocking a move in a low-level hook stops the cursor itself - the
@@ -85,6 +97,7 @@ internal sealed class DesktopClicks : IDisposable
             case LeftDown or RightDown:
             {
                 var button = action == LeftDown ? 1 : 2;
+                Observed |= button;
                 if (OnIcon(at)) { explorers |= button; return CallNextHookEx(hook, code, message, data); }
                 if (button == 1) dragging = true;
                 Clicked?.Invoke(where, button, true);
@@ -94,6 +107,7 @@ internal sealed class DesktopClicks : IDisposable
             case LeftUp or RightUp:
             {
                 var button = action == LeftUp ? 1 : 2;
+                Observed &= ~button;
                 if (button == 1) dragging = false;
                 if ((explorers & button) != 0) { explorers &= ~button; return CallNextHookEx(hook, code, message, data); }
                 Clicked?.Invoke(where, button, false);
@@ -102,9 +116,15 @@ internal sealed class DesktopClicks : IDisposable
 
             // The wheel delta is in the high word of mouseData, 120 to a click.
             case Wheel:
+            {
                 if (OnIcon(at)) return CallNextHookEx(hook, code, message, data);
-                Scrolled?.Invoke(where, (short)(mouse.Data >> 16) / 120);
+                // The delta is in the high word of mouseData, 120 to a notch.
+                notches += (short)(mouse.Data >> 16);
+                var whole = notches / 120;
+                notches -= whole * 120;
+                if (whole != 0) Scrolled?.Invoke(where, whole);
                 return 1;
+            }
             default: return CallNextHookEx(hook, code, message, data);
         }
     }
@@ -148,6 +168,14 @@ internal sealed class DesktopClicks : IDisposable
     }
 
     private static bool AltHeld => (GetKeyState(0x12) & 0x8000) != 0;
+
+    /// <summary>Buttons the hook has watched go down without yet watching them come up.
+    ///
+    /// Not <c>GetAsyncKeyState</c>: presses over the picture are swallowed here, so Windows never
+    /// records them and the system state says nothing is down for the whole of a perfectly ordinary
+    /// hold. Asking it would cut every long press short. While the hook is installed it sees every
+    /// button in the machine, so what it has watched is the closest thing to ground truth there is.</summary>
+    public int Observed { get; private set; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public IntPtr Extra; }

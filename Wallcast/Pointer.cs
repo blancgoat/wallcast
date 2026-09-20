@@ -34,6 +34,8 @@ internal sealed class Pointer : IDisposable
     // Set WALLCAST_TRACE to a path and every report written to the radio lands in it. A click that
     // does not take at the far end is otherwise indistinguishable from a click that was never sent.
     private static readonly string? Trace = Environment.GetEnvironmentVariable("WALLCAST_TRACE");
+    /// <summary>Whether anything is listening, so a caller can skip building a line nobody reads.</summary>
+    public static bool Tracing => Trace is not null;
     public static void Watch(string line) => Note(line);
 
     private static void Note(string line)
@@ -141,6 +143,14 @@ internal sealed class Pointer : IDisposable
         Wake();
     }
 
+    /// <summary>Which buttons the far end has been told are down.</summary>
+    public int Held => Volatile.Read(ref wantButtons);
+
+    /// <summary>Send anything the far end has not been told yet. A write that failed is not retried
+    /// on its own - the pump only stirs when something changes - so a release lost to a bad moment
+    /// on the radio would stay lost. This costs nothing when there is nothing to say.</summary>
+    public void Flush() => Wake();
+
     public void Release()
     {
         Interlocked.Exchange(ref wantButtons, 0);
@@ -166,17 +176,17 @@ internal sealed class Pointer : IDisposable
             var wheel = Interlocked.Exchange(ref wantWheel, 0);
             if (x == sentX && y == sentY && buttons == sentButtons && wheel == 0) continue;
             var wasX = sentX; var wasY = sentY; var wasButtons = sentButtons;
-            sentX = x; sentY = y; sentButtons = buttons;
 
             try
             {
-                // A real mouse never moves and clicks in the same instant, and the far end counts on
+                // A real mouse never moves and acts in the same instant, and the far end counts on
                 // that: iPadOS glides its pointer onto whatever is under it and only then can the
-                // thing be pressed. A single report that teleports and presses at once draws the
-                // press animation and does nothing at all - measured, and the reason a click that
-                // was plainly sent did not take. So the position goes first, on its own, and the
-                // button follows a beat later.
-                if (buttons != wasButtons && (x != wasX || y != wasY))
+                // thing be pressed or scrolled. A single report that teleports and presses at once
+                // draws the press animation and does nothing at all - measured, and the reason a
+                // click that was plainly sent did not take. A wheel is the same: it scrolls whatever
+                // the pointer had settled on, so one that arrives with a jump has nothing to scroll.
+                // The position goes first, on its own, and the rest follows a beat later.
+                if ((buttons != wasButtons || wheel != 0) && (x != wasX || y != wasY))
                 {
                     Note($"settle at {x},{y}");
                     await NotifyAsync(client, Payload((byte)wasButtons, (ushort)x, (ushort)y, 0));
@@ -184,6 +194,10 @@ internal sealed class Pointer : IDisposable
                 }
                 Note($"send buttons={buttons} at {x},{y} wheel={wheel}");
                 await NotifyAsync(client, Payload((byte)buttons, (ushort)x, (ushort)y, wheel));
+                // Recorded only now. Claiming it before the write means a failed write is never
+                // retried, because the next round sees no change and skips - and if what failed was
+                // a release, the far end is left pressed for good.
+                sentX = x; sentY = y; sentButtons = buttons;
             }
             catch (Exception problem) when (problem is not OutOfMemoryException)
             { Status?.Invoke("Bluetooth: " + problem.Message); }
@@ -263,8 +277,13 @@ internal sealed class Pointer : IDisposable
         characteristic.SubscribedClientsChanged += (sender, _) =>
         {
             // A fresh connection knows nothing of where the pointer was, so make the next report say
-            // it outright rather than being skipped as unchanged.
+            // it outright rather than being skipped as unchanged. The buttons matter more than the
+            // position: a link that dropped mid-click leaves the far end holding one, and it will
+            // ignore everything until it is told otherwise. Say "nothing is pressed" outright.
             sentX = sentY = -1;
+            sentButtons = -1;
+            Interlocked.Exchange(ref wantButtons, 0);
+            Wake();
             Status?.Invoke(sender.SubscribedClients.Any(client => Target is null
                 || Tail(client.Session.DeviceId.Id).Equals(Target, StringComparison.OrdinalIgnoreCase))
                 ? "Clicks are reaching the device."

@@ -228,6 +228,16 @@ internal sealed class MainForm : Form
         // are known, and it is the growing of one of them that made the old extent too short.
         watchdog.Tick += (_, _) =>
         {
+            // A release lost to a bad moment on the radio leaves the far end believing a finger is
+            // pressed, and it then ignores everything after it. Stirring the pump costs nothing and
+            // sends anything that did not get through; the hook's own view of the mouse catches the
+            // rarer case where a press was taken and its release never was.
+            if (clicks.Listening)
+            {
+                if (pointer.Held != 0 && clicks.Observed == 0) pointer.Release();
+                else pointer.Flush();
+            }
+
             var current = Screen.AllScreens;
             if (playback?.IsDesktopAlive == false || !current.Select(s => (s.DeviceName, s.Bounds)).SequenceEqual(screens.Select(s => (s.DeviceName, s.Bounds))))
             {
